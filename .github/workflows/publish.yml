@@ -1,4 +1,4 @@
-name: DEPRECATED - Build and Publish ESPHome firmware
+name: Build and Publish ESPHome firmware
 
 on:
   workflow_call:
@@ -7,16 +7,16 @@ on:
         description: Comma-separated list of files to build.
         required: true
         type: string
+      name:
+        description: Name of the firmware to publish.
+        required: false
+        type: string
+        default: ESPHome
     secrets:
       GITHUB_TOKEN:
         required: true
 
 jobs:
-  warning:
-    runs-on: ubuntu-latest
-    steps:
-    - run: |
-        echo "::warning ::This workflow is deprecated and will be removed in the future.\nPlease use the new workflow: `esphome/workflows/.github/workflows/publish.yml@main`"
   prepare:
     runs-on: ubuntu-latest
     outputs:
@@ -48,8 +48,8 @@ jobs:
           name: ${{ steps.esphome-build.outputs.name }}
           path: ${{ steps.esphome-build.outputs.name }}
 
-  deploy:
-    name: Deploy new firmware to GitHub Pages
+  publish:
+    name: Publish new firmware and website to GitHub Pages
     runs-on: ubuntu-latest
     needs: [build]
     steps:
@@ -60,7 +60,7 @@ jobs:
 
       - name: Create single manifest.json
         run: |
-          jq -s '{"name": "ESPHome", "version": "${{ needs.build.outputs.esphome-version }}", "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":.}' output/*/manifest.json > output/manifest.json
+          jq -s '{"name": "${{ inputs.name }}", "version": "${{ needs.build.outputs.esphome-version }}", "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":.}' output/*/manifest.json > output/manifest.json
 
       - run: cp -R static/* output
 
