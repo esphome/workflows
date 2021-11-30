@@ -22,7 +22,7 @@ jobs:
     outputs:
       files: ${{ steps.files-array.outputs.files }}
     steps:
-      - uses: actions/setup-python@v2.3.0
+      - uses: actions/setup-python@v2.3.1
       - id: files-array
         run: |
           files=$(echo "${{ inputs.files }}" | jq -Rcn 'inputs | . / ","')
