@@ -54,7 +54,7 @@ jobs:
     needs: [build]
     steps:
       - uses: actions/checkout@v2.4.0
-      - uses: actions/download-artifact@v2.0.10
+      - uses: actions/download-artifact@v2.1.0
         with:
           path: output
 
