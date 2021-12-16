@@ -13,7 +13,7 @@ on:
         type: string
         default: ESPHome
     secrets:
-      GITHUB_TOKEN:
+      GH_TOKEN:
         required: true
 
 jobs:
@@ -69,3 +69,5 @@ jobs:
         with:
           branch: gh-pages
           folder: output
+        secrets:
+          token: ${{ secrets.GH_TOKEN }}
