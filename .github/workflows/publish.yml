@@ -15,7 +15,7 @@ on:
       clean:
         description: Remove deleted files from the build
         required: false
-        type: bool
+        type: boolean
         default: true
       manifest_filename:
         description: Filename of the manifest to write.
