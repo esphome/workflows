@@ -70,8 +70,9 @@ jobs:
 
       - name: Create single manifest.json
         run: |
-          name=$(echo "${{ inputs.name }}" | sed 's/ /\ /g')
-          jq -s '{"name": "${{ inputs.name }}", "version": "${{ needs.build.outputs.esphome-version }}", "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":.}' output/${name}-*/manifest.json > output/${{ inputs.manifest_filename }}
+          name=$(echo "${{ inputs.name }}" | sed 's/ /\\ /g')
+          echo $name
+          jq -s '{"name": "${{ inputs.name }}", "version": "${{ needs.build.outputs.esphome-version }}", "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":.}' output/$name-*/manifest.json > output/${{ inputs.manifest_filename }}
 
       - run: cp -R static/* output
 
