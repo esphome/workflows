@@ -80,5 +80,4 @@ jobs:
           branch: gh-pages
           folder: output
           clean: ${{ inputs.clean }}
-        secrets:
           token: ${{ secrets.GH_TOKEN }}
