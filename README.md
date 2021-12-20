@@ -19,5 +19,5 @@ jobs:
     with:
       files: esp32.yml,esp8266.yml
     secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
