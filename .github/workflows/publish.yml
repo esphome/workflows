@@ -69,5 +69,3 @@ jobs:
         with:
           branch: gh-pages
           folder: output
-        secrets:
-          token: ${{ secrets.GH_TOKEN }}

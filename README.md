@@ -18,6 +18,4 @@ jobs:
     uses: esphome/build-action/.github/workflows/build.yml@main
     with:
       files: esp32.yml,esp8266.yml
-    secrets:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
