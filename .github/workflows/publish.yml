@@ -12,9 +12,6 @@ on:
         required: false
         type: string
         default: ESPHome
-    secrets:
-      GH_TOKEN:
-        required: true
 
 jobs:
   prepare:
