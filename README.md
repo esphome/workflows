@@ -6,7 +6,7 @@ This repository contains workflows to be used by other repositories.
 ## Build and publish firmware with GitHub Pages and ESP Web Tools
 
 ```yaml
-name: Build example
+name: Build and Publish
 
 on:
   push:
@@ -15,7 +15,8 @@ on:
 
 jobs:
   build:
-    uses: esphome/build-action/.github/workflows/build.yml@main
+    uses: esphome/workflows/.github/workflows/publish.yml@main
     with:
       files: esp32.yml,esp8266.yml
+      name: Your Project Name
 ```
