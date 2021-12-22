@@ -7,9 +7,6 @@ on:
         description: Comma-separated list of files to build.
         required: true
         type: string
-    secrets:
-      GITHUB_TOKEN:
-        required: true
 
 jobs:
   warning:

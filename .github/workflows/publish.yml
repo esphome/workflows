@@ -22,9 +22,6 @@ on:
         required: false
         type: string
         default: manifest.json
-    secrets:
-      GH_TOKEN:
-        required: true
 
 jobs:
   prepare:
@@ -82,4 +79,3 @@ jobs:
           branch: gh-pages
           folder: output
           clean: ${{ inputs.clean }}
-          token: ${{ secrets.GH_TOKEN }}
