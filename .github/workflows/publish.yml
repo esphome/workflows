@@ -12,6 +12,16 @@ on:
         required: false
         type: string
         default: ESPHome
+      clean:
+        description: Remove deleted files from the build
+        required: false
+        type: boolean
+        default: true
+      manifest_filename:
+        description: Filename of the manifest to write.
+        required: false
+        type: string
+        default: manifest.json
 
 jobs:
   prepare:
@@ -42,7 +52,7 @@ jobs:
           yaml_file: ${{ matrix.file }}
       - uses: actions/upload-artifact@v2.3.0
         with:
-          name: ${{ steps.esphome-build.outputs.name }}
+          name: ${{ inputs.name }}-${{ steps.esphome-build.outputs.name }}
           path: ${{ steps.esphome-build.outputs.name }}
 
   publish:
@@ -57,7 +67,8 @@ jobs:
 
       - name: Create single manifest.json
         run: |
-          jq -s '{"name": "${{ inputs.name }}", "version": "${{ needs.build.outputs.esphome-version }}", "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":.}' output/*/manifest.json > output/manifest.json
+          name="${{ inputs.name }}"
+          jq -s '{"name": "${{ inputs.name }}", "version": "${{ needs.build.outputs.esphome-version }}", "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":.}' output/"$name"-*/manifest.json > output/${{ inputs.manifest_filename }}
 
       - run: cp -R static/* output
 
@@ -66,3 +77,4 @@ jobs:
         with:
           branch: gh-pages
           folder: output
+          clean: ${{ inputs.clean }}
