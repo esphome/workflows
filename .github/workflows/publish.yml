@@ -51,6 +51,7 @@ jobs:
           yaml_file: ${{ matrix.file }}
       - run: |
           mkdir output
+          ls -al
           mv "${{ steps.esphome-build.outputs.name }}" output/
       - uses: actions/upload-artifact@v2.3.1
         with:
