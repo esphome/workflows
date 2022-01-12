@@ -45,14 +45,17 @@ jobs:
       esphome-version: ${{ steps.esphome-build.outputs.esphome-version }}
     steps:
       - uses: actions/checkout@v2.4.0
-      - uses: esphome/build-action@v1.1.0
+      - uses: esphome/build-action@v1.2.1
         id: esphome-build
         with:
           yaml_file: ${{ matrix.file }}
+      - run: |
+          mkdir output
+          mv "${{ steps.esphome-build.outputs.name }}" output/
       - uses: actions/upload-artifact@v2.3.1
         with:
-          name: ${{ inputs.name }}-${{ steps.esphome-build.outputs.name }}
-          path: ${{ steps.esphome-build.outputs.name }}
+          name: ${{ inputs.name }}
+          path: output
 
   publish:
     name: Publish new firmware and website to GitHub Pages
@@ -63,11 +66,11 @@ jobs:
       - uses: actions/download-artifact@v2.1.0
         with:
           path: output
+          name: ${{ inputs.name }}
 
       - name: Create single manifest.json
         run: |
-          name="${{ inputs.name }}"
-          jq -s '{"name": "${{ inputs.name }}", "version": "${{ needs.build.outputs.esphome-version }}", "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":.}' output/"$name"-*/manifest.json > output/${{ inputs.manifest_filename }}
+          jq -s '{"name": "${{ inputs.name }}", "version": "${{ needs.build.outputs.esphome-version }}", "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":.}' output/*/manifest.json > output/${{ inputs.manifest_filename }}
 
       - run: cp -R static/* output
 
