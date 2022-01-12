@@ -49,10 +49,13 @@ jobs:
         id: esphome-build
         with:
           yaml_file: ${{ matrix.file }}
+      - run: |
+          mkdir output
+          mv "${{ steps.esphome-build.outputs.name }}" output/
       - uses: actions/upload-artifact@v2.3.1
         with:
           name: ${{ inputs.name }}
-          path: ${{ steps.esphome-build.outputs.name }}
+          path: output
 
   publish:
     name: Publish new firmware and website to GitHub Pages
