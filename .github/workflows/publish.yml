@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: manifest.json
+      esphome_version:
+        description: Version of ESPHome to build for.
+        required: false
+        type: string
+        default: latest
 
 jobs:
   prepare:
@@ -45,10 +50,11 @@ jobs:
       esphome-version: ${{ steps.esphome-build.outputs.esphome-version }}
     steps:
       - uses: actions/checkout@v3.0.2
-      - uses: esphome/build-action@v1.4.0
+      - uses: esphome/build-action@v1.5.0
         id: esphome-build
         with:
           yaml_file: ${{ matrix.file }}
+          version: ${{ inputs.esphome_version }}
       - run: |
           mkdir output
           mv "${{ steps.esphome-build.outputs.name }}" output/
