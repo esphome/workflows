@@ -78,9 +78,7 @@ jobs:
         run: |
           jq -s '{"name": "${{ inputs.name }}", "version": "${{ needs.build.outputs.esphome-version }}", "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":.}' output/*/manifest.json > output/${{ inputs.manifest_filename }}
 
-      - name: Move static website files (if they exist)
-        if: ${{ hashFiles('static/') != '' }}
-        run: cp -R static/* output
+      - run: cp -R static/* output
 
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@v4.6.1
