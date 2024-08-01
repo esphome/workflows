@@ -1,0 +1,69 @@
+name: Build
+# This workflow is only to be used within the ESPHome organisation on GitHub.
+# It is used to build and upload the binaries to Cloudflare R2 and only
+# specific repositories will be granted the secrets required to do so.
+
+on:
+  workflow_call:
+    inputs:
+      files:
+        description: Newline separated list of files to build
+        required: true
+        type: string
+      name:
+        description: Name of the firmware to publish
+        required: false
+        type: string
+      esphome-version:
+        description: Version of ESPHome to build with
+        required: false
+        type: string
+        default: latest
+      release-summary:
+        description: Summary of the release
+        required: false
+        type: string
+        default: ""
+      release-url:
+        description: URL to the release notes
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      files: ${{ steps.files-array.outputs.files }}
+    steps:
+      - id: files-array
+        run: |
+          files=$(echo "${{ inputs.files }}" | jq -Rcn 'inputs | . / "\n"')
+          echo files=$files >> $GITHUB_OUTPUT
+
+  build:
+    name: Build ESPHome firmware for ${{ matrix.file }}
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        file: ${{ fromJson(needs.prepare.outputs.files) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.1.7
+      - name: Build Firmware
+        uses: esphome/build-action@v3.3.0
+        id: esphome-build
+        with:
+          yaml_file: ${{ matrix.file }}
+          version: ${{ inputs.esphome-version }}
+          complete-manifest: true
+          release_summary: ${{ inputs.release-summary }}
+          release_url: ${{ inputs.release-url }}
+      - run: tree
+      # - name: Upload artifact
+      #   uses: actions/upload-artifact@v4.3.4
+      #   with:
+      #     name: ${{ steps.esphome-build.outputs.name }}
+      #     path: ${{ steps.esphome-build.outputs.name }}
