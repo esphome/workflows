@@ -29,6 +29,11 @@ on:
         required: false
         type: string
         default: ""
+      upload:
+        description: Upload the firmware to Cloudflare R2
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   prepare:
