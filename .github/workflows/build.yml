@@ -90,6 +90,11 @@ jobs:
           complete-manifest: true
           release-summary: ${{ inputs.release-summary }}
           release-url: ${{ inputs.release-url }}
+      - name: Move files for versioning
+        run: |
+          cd ${{ steps.esphome-build.outputs.name }}
+          mkdir ${{ needs.prepare.outputs.version }}
+          mv *.* ${{ needs.prepare.outputs.version }}/
       - name: Upload artifact
         uses: actions/upload-artifact@v4.3.4
         with:
@@ -119,5 +124,4 @@ jobs:
           r2-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
           source-dir: files
-          destination-dir: ${{ inputs.name }}/${{ needs.prepare.outputs.version }}/
-
+          destination-dir: ${{ inputs.name }}/
