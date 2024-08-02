@@ -142,10 +142,11 @@ jobs:
       - name: Copy manifest.json
         run: |
           mkdir -p output
+          version="${{ needs.prepare.outputs.version }}"
           for device in files/*; do
             device=$(basename $device)
             mkdir -p output/$device
-            jq --arg version "${{ needs.prepare.outputs.version }}" \
+            jq --arg version "$version" \
               '.builds[].ota.path |= $version + "/" + . | .builds[].parts[].path |= $version + "/" + .' \
               files/$device/$version/manifest.json > output/$device/manifest.json
           done
