@@ -92,14 +92,13 @@ jobs:
           release-url: ${{ inputs.release-url }}
       - name: Move files for versioning
         run: |
-          cd ${{ steps.esphome-build.outputs.name }}
-          mkdir ${{ needs.prepare.outputs.version }}
-          mv *.* ${{ needs.prepare.outputs.version }}/
+          mkdir -p output/${{ needs.prepare.outputs.version }}
+          mv ${{ steps.esphome-build.outputs.name }}/* output/${{ needs.prepare.outputs.version }}/
       - name: Upload artifact
         uses: actions/upload-artifact@v4.3.4
         with:
           name: ${{ steps.esphome-build.outputs.original-name }}
-          path: ${{ steps.esphome-build.outputs.name }}
+          path: output
 
   upload:
     name: Upload firmware to Cloudflare R2
