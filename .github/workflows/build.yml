@@ -34,6 +34,11 @@ on:
         required: false
         type: boolean
         default: false
+      release-version:
+        description: Version of the release
+        required: false
+        type: string
+        default: ""
 
 jobs:
   prepare:
@@ -56,21 +61,52 @@ jobs:
       max-parallel: 3
       matrix:
         file: ${{ fromJson(needs.prepare.outputs.files) }}
+    outputs:
+      project-version: ${{ steps.project-version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4.1.7
+      - name: Replace project version
+        id: project-version
+        if: inputs.upload == 'true'
+        run: |
+          if [ -z "${{ inputs.release-version }}" ]; then
+            echo "No release version specified, appending datetimestamp"
+            version=dev-$(date +'%Y%m%d-%H%M')
+          else
+            echo "Replacing version with ${{ inputs.release-version }}"
+            version=${{ inputs.release-version }}
+          fi
+          sed -i "s/version: dev/version: $version/g" ${{ matrix.file }}
+          echo version=$version >> $GITHUB_OUTPUT
+      - name: Append version with datetimestamp
+        if: inputs.release-version == '' && inputs.upload == 'true'
+        run: |
+          sed -i "s/version: dev/version: dev-$(date +'%Y%m%d%H%M%S')/g" ${{ matrix.file }}
       - name: Build Firmware
-        uses: esphome/build-action@v3.3.0
+        uses: esphome/build-action@v4.0.0
         id: esphome-build
         with:
-          yaml_file: ${{ matrix.file }}
+          yaml-file: ${{ matrix.file }}
           version: ${{ inputs.esphome-version }}
           complete-manifest: true
-          release_summary: ${{ inputs.release-summary }}
-          release_url: ${{ inputs.release-url }}
+          release-summary: ${{ inputs.release-summary }}
+          release-url: ${{ inputs.release-url }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.3.4
+        with:
+          name: ${{ steps.esphome-build.outputs.original-name }}
+          path: ${{ steps.esphome-build.outputs.name }}
+
+  upload:
+    name: Upload firmware to Cloudflare R2
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: ${{ inputs.upload }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.1.8
+        with:
+          path: files
+
       - run: tree
-      # - name: Upload artifact
-      #   uses: actions/upload-artifact@v4.3.4
-      #   with:
-      #     name: ${{ steps.esphome-build.outputs.name }}
-      #     path: ${{ steps.esphome-build.outputs.name }}
