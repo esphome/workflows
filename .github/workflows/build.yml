@@ -47,7 +47,8 @@ jobs:
     outputs:
       files: ${{ steps.files-array.outputs.files }}
     steps:
-      - id: files-array
+      - name: Split files input into JSON array
+        id: files-array
         run: |
           files=$(echo "${{ inputs.files }}" | jq -RcSn '[inputs | select(length>0)]')
           echo files=$files >> $GITHUB_OUTPUT
