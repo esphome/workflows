@@ -44,7 +44,7 @@ jobs:
     steps:
       - id: files-array
         run: |
-          files=$(echo "${{ inputs.files }}" | jq -Rcn 'inputs | . / "\n"')
+          files=$(echo "${{ inputs.files }}" | jq -RcSn '[inputs | select(length>0)]')
           echo files=$files >> $GITHUB_OUTPUT
 
   build:
