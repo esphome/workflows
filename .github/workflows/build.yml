@@ -46,12 +46,25 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       files: ${{ steps.files-array.outputs.files }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Split files input into JSON array
         id: files-array
         run: |
           files=$(echo "${{ inputs.files }}" | jq -RcSn '[inputs | select(length>0)]')
           echo files=$files >> $GITHUB_OUTPUT
+      - name: Generate version
+        id: version
+        run: |
+          if [ -n "${{ inputs.release-version }}" ]; then
+            version=${{ inputs.release-version }}
+          elif [ "${{ inputs.upload }}" == "true" ]; then
+            version=dev-$(date +'%Y%m%d-%H%M')
+          else
+            version=dev
+          fi
+
+          echo version=$version >> $GITHUB_OUTPUT
 
   build:
     name: Build ESPHome firmware for ${{ matrix.file }}
@@ -62,28 +75,12 @@ jobs:
       max-parallel: 3
       matrix:
         file: ${{ fromJson(needs.prepare.outputs.files) }}
-    outputs:
-      project-version: ${{ steps.project-version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4.1.7
       - name: Replace project version
-        id: project-version
-        if: inputs.upload == 'true'
         run: |
-          if [ -z "${{ inputs.release-version }}" ]; then
-            echo "No release version specified, appending datetimestamp"
-            version=dev-$(date +'%Y%m%d-%H%M')
-          else
-            echo "Replacing version with ${{ inputs.release-version }}"
-            version=${{ inputs.release-version }}
-          fi
-          sed -i "s/version: dev/version: $version/g" ${{ matrix.file }}
-          echo version=$version >> $GITHUB_OUTPUT
-      - name: Append version with datetimestamp
-        if: inputs.release-version == '' && inputs.upload == 'true'
-        run: |
-          sed -i "s/version: dev/version: dev-$(date +'%Y%m%d%H%M%S')/g" ${{ matrix.file }}
+          sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
       - name: Build Firmware
         uses: esphome/build-action@v4.0.0
         id: esphome-build
@@ -101,7 +98,9 @@ jobs:
 
   upload:
     name: Upload firmware to Cloudflare R2
-    needs: [build]
+    needs:
+      - prepare
+      - build
     runs-on: ubuntu-latest
     if: ${{ inputs.upload }}
     steps:
