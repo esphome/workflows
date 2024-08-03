@@ -39,6 +39,11 @@ on:
         required: false
         type: string
         default: ""
+      combined_name:
+        description: Combine all files into a single manifest under this name
+        required: false
+        type: string
+        default: ""
 
 jobs:
   prepare:
@@ -87,7 +92,7 @@ jobs:
         with:
           yaml-file: ${{ matrix.file }}
           version: ${{ inputs.esphome-version }}
-          complete-manifest: true
+          complete-manifest: ${{ inputs.combined_name == '' }}
           release-summary: ${{ inputs.release-summary }}
           release-url: ${{ inputs.release-url }}
       - name: Move files for versioning
@@ -97,7 +102,51 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4.3.4
         with:
-          name: ${{ steps.esphome-build.outputs.original-name }}
+          name: ${{ inputs.combined_name != '' && steps.esphome-build.outputs.name || steps.esphome-build.outputs.original-name }}
+          path: output
+
+  combine:
+    name: Combine all parts into a single manifest
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-latest
+    if: inputs.combined_name != ''
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.1.8
+        with:
+          path: files
+
+      - name: Get artifact names
+        id: artifacts
+        run: |
+          artifacts=$(ls --format=single-column files)
+          echo artifacts="$artifacts" >> $GITHUB_OUTPUT
+
+      - uses: geekyeggo/delete-artifact@v5.0.0
+        with:
+          name: ${{ steps.artifacts.outputs.artifacts }}
+
+      - run: tree
+
+      - name: Combine all parts into a single manifest
+        run: |
+          version="${{ needs.prepare.outputs.version }}"
+          mkdir -p "output/$version"
+          pushd files
+          for device in *; do
+            pushd $device
+            cp * "../../output/$version/"
+            popd
+          done
+          popd
+          jq -s '(.[0] | del(.builds)) + {"builds": (reduce .[].builds as $b ([]; . + $b))}' files/*/$version/manifest.json > output/$version/manifest.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.3.4
+        with:
+          name: ${{ inputs.combined_name }}
           path: output
 
   upload:
