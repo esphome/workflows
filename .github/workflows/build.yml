@@ -1,7 +1,4 @@
 name: Build
-# This workflow is only to be used within the ESPHome organisation on GitHub.
-# It is used to build and upload the binaries to Cloudflare R2 and only
-# specific repositories will be granted the secrets required to do so.
 
 on:
   workflow_call:
@@ -9,10 +6,6 @@ on:
       files:
         description: Newline separated list of files to build
         required: true
-        type: string
-      name:
-        description: Name of the firmware to publish
-        required: false
         type: string
       esphome-version:
         description: Version of ESPHome to build with
@@ -29,16 +22,21 @@ on:
         required: false
         type: string
         default: ""
-      upload:
-        description: Upload the firmware to Cloudflare R2
-        required: false
-        type: boolean
-        default: false
       release-version:
         description: Version of the release
         required: false
         type: string
         default: ""
+      combined-name:
+        description: Combine all files into a single manifest under this name
+        required: false
+        type: string
+        default: ""
+
+    outputs:
+      version:
+        description: Version of the firmware generated
+        value: ${{ jobs.prepare.outputs.version }}
 
 jobs:
   prepare:
@@ -47,6 +45,7 @@ jobs:
     outputs:
       files: ${{ steps.files-array.outputs.files }}
       version: ${{ steps.version.outputs.version }}
+      artifact-prefix: ${{ steps.artifact-name.outputs.artifact-prefix }}
     steps:
       - name: Split files input into JSON array
         id: files-array
@@ -58,16 +57,19 @@ jobs:
         run: |
           if [ -n "${{ inputs.release-version }}" ]; then
             version=${{ inputs.release-version }}
-          elif [ "${{ inputs.upload }}" == "true" ]; then
-            version=dev-$(date +'%Y%m%d-%H%M')
           else
-            version=dev
+            version=dev-$(date +'%Y%m%d-%H%M')
           fi
 
           echo version=$version >> $GITHUB_OUTPUT
+      - name: Generated random artifact prefix
+        id: artifact-name
+        run: |
+          artifact_prefix=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16; echo)
+          echo artifact-prefix=$artifact_prefix >> $GITHUB_OUTPUT
 
   build:
-    name: Build ESPHome firmware for ${{ matrix.file }}
+    name: ${{ matrix.file }}
     needs: [prepare]
     runs-on: ubuntu-latest
     strategy:
@@ -97,66 +99,53 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4.3.4
         with:
-          name: ${{ steps.esphome-build.outputs.original-name }}
+          name: ${{ inputs.combined-name != '' && format('{0}-{1}', needs.prepare.outputs.artifact-prefix, steps.esphome-build.outputs.name) || steps.esphome-build.outputs.original-name }}
           path: output
 
-  upload:
-    name: Upload firmware to Cloudflare R2
+  combine:
+    name: Combine manifests
     needs:
       - prepare
       - build
     runs-on: ubuntu-latest
-    if: inputs.upload
+    if: inputs.combined-name != ''
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4.1.8
         with:
           path: files
+          pattern: ${{ needs.prepare.outputs.artifact-prefix }}-*
 
-      - run: tree
-
-      - name: Upload files to R2
-        uses: ryand56/r2-upload-action@v1.3.2
-        with:
-          r2-account-id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
-          r2-bucket: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
-          source-dir: files
-          destination-dir: ${{ inputs.name }}/
-
-  promote:
-    name: Promote firmware to production
-    needs:
-      - prepare
-      - upload
-    runs-on: ubuntu-latest
-    environment: production
-    if: inputs.upload && inputs.release-version != ''
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4.1.8
-        with:
-          path: files
-
-      - name: Copy manifest.json
+      - name: Get artifact names
+        id: artifacts
         run: |
-          mkdir -p output
-          version="${{ needs.prepare.outputs.version }}"
-          for device in files/*; do
-            device=$(basename $device)
-            mkdir -p output/$device
-            jq --arg version "$version" \
-              '.builds[].ota.path |= $version + "/" + . | .builds[].parts[].path |= $version + "/" + .' \
-              files/$device/$version/manifest.json > output/$device/manifest.json
-          done
+          artifacts=$(ls --format=single-column files)
+          echo "artifacts<<EOF" >> $GITHUB_OUTPUT
+          echo "$artifacts" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Upload files to R2
-        uses: ryand56/r2-upload-action@v1.3.2
+      - name: Delete prefixed artifacts
+        uses: geekyeggo/delete-artifact@v5.0.0
         with:
-          r2-account-id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
-          r2-bucket: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
-          source-dir: output
-          destination-dir: ${{ inputs.name }}/
+          name: ${{ steps.artifacts.outputs.artifacts }}
+
+      - name: Combine all parts into a single manifest
+        run: |
+          version="${{ needs.prepare.outputs.version }}"
+          mkdir -p "output/$version"
+          pushd files
+          for device in *; do
+            pushd $device
+            pushd $version
+            cp * "../../../output/$version/"
+            popd
+            popd
+          done
+          popd
+          jq -s '(.[0] | del(.builds)) + {"builds": (reduce .[].builds as $b ([]; . + $b))}' files/*/$version/manifest.json > output/$version/manifest.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.3.4
+        with:
+          name: ${{ inputs.combined-name }}
+          path: output
