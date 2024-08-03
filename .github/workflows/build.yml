@@ -122,7 +122,9 @@ jobs:
         id: artifacts
         run: |
           artifacts=$(ls --format=single-column files)
-          echo "artifacts=$artifacts" >> $GITHUB_OUTPUT
+          echo "artifacts<<EOF" >> $GITHUB_OUTPUT
+          echo "$artifacts" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - uses: geekyeggo/delete-artifact@v5.0.0
         with:
