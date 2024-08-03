@@ -138,7 +138,7 @@ jobs:
           for device in *; do
             pushd $device
             pushd $version
-            cp * "../../output/$version/"
+            cp * "../../../output/$version/"
             popd
             popd
           done
