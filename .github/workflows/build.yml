@@ -69,7 +69,7 @@ jobs:
           echo artifact-prefix=$artifact_prefix >> $GITHUB_OUTPUT
 
   build:
-    name: Build ESPHome firmware for ${{ matrix.file }}
+    name: ${{ matrix.file }}
     needs: [prepare]
     runs-on: ubuntu-latest
     strategy:
@@ -89,7 +89,7 @@ jobs:
         with:
           yaml-file: ${{ matrix.file }}
           version: ${{ inputs.esphome-version }}
-          complete-manifest: ${{ inputs.combined-name == '' }}
+          complete-manifest: true
           release-summary: ${{ inputs.release-summary }}
           release-url: ${{ inputs.release-url }}
       - name: Move files for versioning
@@ -103,7 +103,7 @@ jobs:
           path: output
 
   combine:
-    name: Combine all parts into a single manifest
+    name: Combine manifests
     needs:
       - prepare
       - build
