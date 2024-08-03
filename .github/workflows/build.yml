@@ -65,8 +65,8 @@ jobs:
       - name: Generated random artifact prefix
         id: artifact-name
         run: |
-          artifact_prefix=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
-          echo artifact-prefix=$artifact_name >> $GITHUB_OUTPUT
+          artifact_prefix=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16; echo)
+          echo artifact-prefix=$artifact_prefix >> $GITHUB_OUTPUT
 
   build:
     name: Build ESPHome firmware for ${{ matrix.file }}
