@@ -116,17 +116,17 @@ jobs:
           path: files
           pattern: ${{ needs.prepare.outputs.artifact-prefix }}-*
 
+      - run: tree
+
       - name: Get artifact names
         id: artifacts
         run: |
           artifacts=$(ls --format=single-column files)
-          echo artifacts="$artifacts" >> $GITHUB_OUTPUT
+          echo "artifacts=$artifacts" >> $GITHUB_OUTPUT
 
       - uses: geekyeggo/delete-artifact@v5.0.0
         with:
           name: ${{ steps.artifacts.outputs.artifacts }}
-
-      - run: tree
 
       - name: Combine all parts into a single manifest
         run: |
@@ -140,6 +140,8 @@ jobs:
           done
           popd
           jq -s '(.[0] | del(.builds)) + {"builds": (reduce .[].builds as $b ([]; . + $b))}' files/*/$version/manifest.json > output/$version/manifest.json
+
+      - run: tree output
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4.3.4
