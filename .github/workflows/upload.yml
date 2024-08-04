@@ -59,7 +59,7 @@ jobs:
             device=$(basename $device)
             mkdir -p output/$device
             jq --arg version "$version" \
-              '.builds[].ota.path |= $version + "/" + . | .builds[].parts[].path |= $version + "/" + .' \
+              '.builds[].ota.path |= $version + "/" + . | (.builds[].parts // [])[].path |= $version + "/" + .' \
               files/$device/$version/manifest.json > output/$device/manifest.json
           done
 
