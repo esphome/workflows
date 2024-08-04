@@ -6,9 +6,9 @@ name: Upload
 on:
   workflow_call:
     inputs:
-      name:
-        description: Name of the firmware to upload
-        required: false
+      directory:
+        description: Directory to upload to
+        required: true
         type: string
       version:
         description: Version of the release
@@ -36,7 +36,7 @@ jobs:
           r2-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
           source-dir: files
-          destination-dir: ${{ inputs.name }}/
+          destination-dir: ${{ inputs.directory }}/
 
   promote:
     name: Promote firmware to production
@@ -71,4 +71,4 @@ jobs:
           r2-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
           source-dir: output
-          destination-dir: ${{ inputs.name }}/
+          destination-dir: ${{ inputs.directory }}/
