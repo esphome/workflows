@@ -15,6 +15,11 @@ on:
         required: false
         type: string
         default: ""
+      channel:
+        description: Channel to upload to. "beta" or "production"
+        required: false
+        type: string
+        default: "production"
 
 jobs:
   upload:
@@ -38,13 +43,13 @@ jobs:
           source-dir: files
           destination-dir: ${{ inputs.directory }}/
 
-  promote:
+  promote-prod:
     name: Promote firmware to production
     needs:
       - upload
     runs-on: ubuntu-latest
     environment: production
-    if: inputs.version != ''
+    if: inputs.version != '' && inputs.channel == 'production'
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4.1.8
@@ -61,6 +66,41 @@ jobs:
             jq --arg version "$version" \
               '.builds[].ota.path |= $version + "/" + . | (.builds[].parts // [])[].path |= $version + "/" + .' \
               files/$device/$version/manifest.json > output/$device/manifest.json
+          done
+
+      - name: Upload files to R2
+        uses: ryand56/r2-upload-action@v1.3.2
+        with:
+          r2-account-id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          source-dir: output
+          destination-dir: ${{ inputs.directory }}/
+
+  promote-beta:
+    name: Promote firmware to beta
+    needs:
+      - upload
+    runs-on: ubuntu-latest
+    environment: beta
+    if: inputs.version != ''
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.1.8
+        with:
+          path: files
+
+      - name: Copy manifest.json
+        run: |
+          mkdir -p output
+          version="${{ inputs.version }}"
+          for device in files/*; do
+            device=$(basename $device)
+            mkdir -p output/$device
+            jq --arg version "$version" \
+              '.builds[].ota.path |= $version + "/" + . | (.builds[].parts // [])[].path |= $version + "/" + .' \
+              files/$device/$version/manifest.json > output/$device/manifest-beta.json
           done
 
       - name: Upload files to R2
