@@ -79,7 +79,7 @@ jobs:
         file: ${{ fromJson(needs.prepare.outputs.files) }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4.1.7
+        uses: actions/checkout@v4.2.0
       - name: Replace project version
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
