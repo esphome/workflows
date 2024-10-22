@@ -32,6 +32,23 @@ on:
         required: false
         type: string
         default: ""
+      # FIXME: this should be a secret
+      wifi_ssid:
+        description: Combine all files into a single manifest under this name
+        required: true
+        type: string
+      wifi_password:
+        description: Combine all files into a single manifest under this name
+        required: true
+        type: string
+      encryption_key:
+        description: Combine all files into a single manifest under this name
+        required: true
+        type: string
+      ota_password:
+        description: Combine all files into a single manifest under this name
+        required: true
+        type: string
 #    secrets:
 #      wifi_ssid:
 #        description: Combine all files into a single manifest under this name
