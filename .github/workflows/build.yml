@@ -80,6 +80,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4.2.1
+      - name: Configure secrets.yaml file
+        run: |
+          python -c "import os; file = open('albionboxes/secrets.yaml', 'w'); file.write(os.environ['FOO']); file.close()"
+        shell: bash
+        env:
+          FOO: ${{secrets.FOO}}
       - name: Replace project version
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
