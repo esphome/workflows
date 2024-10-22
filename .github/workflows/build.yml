@@ -38,7 +38,7 @@ on:
         type: string
         default: ""
       # FIXME: this should be a secret
-      secret-environment:
+      secrets-environment:
         description: Combine all files into a single manifest under this name
         required: true
         type: string
@@ -140,7 +140,7 @@ jobs:
     needs: [prepare]
     runs-on: ubuntu-latest
     environment:
-      name: ${{ inputs.secret-environment }}
+      name: ${{ inputs.secrets-environment }}
     strategy:
       fail-fast: false
       max-parallel: 3
