@@ -125,7 +125,7 @@ jobs:
         uses: actions/checkout@v4.2.1
       - name: Configure secrets.yaml file
         run: |
-          python -c "import os; import yaml; print(os.environ); secrets_data = dict(wifi_ssid=os.environ['wifi_ssid'], wifi_password=os.environ['wifi_password'], encryption_key=os.environ['encryption_key'], ota_password=os.environ['ota_password'], rufus_url=os.environ['rufus_url']); secrets_file = open('albionboxes/secrets.yaml', 'w'); yaml.dump(secrets_data, secrets_file, default_flow_style=False); secrets_file.close()"
+          python -c "import os; import yaml; print(os.environ); secrets_data = dict(wifi_ssid=os.environ['wifi_ssid'], wifi_password=os.environ['wifi_password'], encryption_key=os.environ['encryption_key'], ota_password=os.environ['ota_password'], rufus_url=os.environ['rufus_url'], volcano_mac_address=os.environ['volcano_mac_address']); secrets_file = open('albionboxes/secrets.yaml', 'w'); yaml.dump(secrets_data, secrets_file, default_flow_style=False); secrets_file.close()"
         shell: bash
         env:
           # FIXME: this should be a secret
