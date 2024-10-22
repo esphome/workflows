@@ -37,68 +37,11 @@ on:
         required: false
         type: string
         default: ""
-      # FIXME: this should be a secret
+      # FIXME: this should be optional
       secrets-environment:
         description: Combine all files into a single manifest under this name
         required: true
         type: string
-#      wifi_ssid:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      wifi_password:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      encryption_key:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      ota_password:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      rufus_url:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      volcano_mac_address:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      gaggia_timer_alarm_media_file_path:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      front_door_lock_url:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      back_door_lock_url:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      milanais_username:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#      milanais_password:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#        type: string
-#    secrets:
-#      wifi_ssid:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#      wifi_password:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#      encryption_key:
-#        description: Combine all files into a single manifest under this name
-#        required: true
-#      ota_password:
-#        description: Combine all files into a single manifest under this name
-#        required: true
 
     outputs:
       version:
@@ -154,7 +97,7 @@ jobs:
           python -c "import os; import yaml; print(os.environ); secrets_data = dict(wifi_ssid=os.environ['wifi_ssid'], wifi_password=os.environ['wifi_password'], encryption_key=os.environ['encryption_key'], ota_password=os.environ['ota_password'], rufus_url=os.environ['rufus_url'], volcano_mac_address=os.environ['volcano_mac_address'], gaggia_timer_alarm_media_file_path=os.environ['gaggia_timer_alarm_media_file_path'], front_door_lock_url=os.environ['front_door_lock_url'], back_door_lock_url=os.environ['back_door_lock_url'], milanais_username=os.environ['milanais_username'], milanais_password=os.environ['milanais_password']); secrets_file = open('albionboxes/secrets.yaml', 'w'); yaml.dump(secrets_data, secrets_file, default_flow_style=False); secrets_file.close()"
         shell: bash
         env:
-          # FIXME: this should be a secret
+          # FIXME: this should be more dynamic
           wifi_ssid: ${{ secrets.WIFI_SSID }}
           wifi_password: ${{ secrets.WIFI_PASSWORD }}
           encryption_key: ${{ secrets.ENCRYPTION_KEY }}
@@ -166,11 +109,7 @@ jobs:
           back_door_lock_url: ${{ secrets.BACK_DOOR_LOCK_URL }}
           milanais_username: ${{ secrets.MILANAIS_USERNAME }}
           milanais_password: ${{ secrets.MILANAIS_PASSWORD }}
-#          test_ota_password: ${{ secrets.OTA_PASSWORD }}
-#          wifi_ssid: ${{ secrets.wifi_ssid }}
-#          wifi_password: ${{ secrets.wifi_password }}
-#          encryption_key: ${{ secrets.encryption_key }}
-#          ota_password: ${{ secrets.ota_password }}
+
       - name: DEBUG echo the secrets.yaml file
         run: |
           cat albionboxes/secrets.yaml
