@@ -82,12 +82,13 @@ jobs:
         uses: actions/checkout@v4.2.1
       - name: Configure secrets.yaml file
         run: |
-          python -c "import os; import yaml; secrets_data = dict(wifi_ssid=os.environ['wifi_ssid'], wifi_password=os.environ['wifi_password'], encryption_key=os.environ['encryption_key']); secrets_file = open('albionboxes/secrets.yaml', 'w'); yaml.dump(secrets_data, secrets_file, default_flow_style=False); secrets_file.close()"
+          python -c "import os; import yaml; secrets_data = dict(wifi_ssid=os.environ['wifi_ssid'], wifi_password=os.environ['wifi_password'], encryption_key=os.environ['encryption_key'], ota_password=os.environ['ota_password']); secrets_file = open('albionboxes/secrets.yaml', 'w'); yaml.dump(secrets_data, secrets_file, default_flow_style=False); secrets_file.close()"
         shell: bash
         env:
           wifi_ssid: ${{secrets.wifi_ssid}}
           wifi_password: ${{secrets.wifi_password}}
           encryption_key: ${{secrets.encryption_key}}
+          ota_password: ${{secrets.ota_password}}
       - name: Replace project version
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
