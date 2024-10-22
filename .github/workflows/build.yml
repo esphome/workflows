@@ -134,7 +134,7 @@ jobs:
           encryption_key: ${{ inputs.encryption_key }}
           ota_password: ${{ inputs.ota_password }}
           rufus_url: ${{ inputs.rufus_url }}
-          volcano_mac_address: $${{ inputs.volcano_mac_address }}
+          volcano_mac_address: ${{ inputs.volcano_mac_address }}
 #          wifi_ssid: ${{ secrets.wifi_ssid }}
 #          wifi_password: ${{ secrets.wifi_password }}
 #          encryption_key: ${{ secrets.encryption_key }}
