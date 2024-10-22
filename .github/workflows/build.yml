@@ -62,6 +62,10 @@ on:
         description: Combine all files into a single manifest under this name
         required: true
         type: string
+      gaggia_timer_alarm_media_file_path:
+        description: Combine all files into a single manifest under this name
+        required: true
+        type: string
 #    secrets:
 #      wifi_ssid:
 #        description: Combine all files into a single manifest under this name
@@ -135,6 +139,7 @@ jobs:
           ota_password: ${{ inputs.ota_password }}
           rufus_url: ${{ inputs.rufus_url }}
           volcano_mac_address: ${{ inputs.volcano_mac_address }}
+          gaggia_timer_alarm_media_file_path: ${{ inputs.gaggia_timer_alarm_media_file_path }}
 #          wifi_ssid: ${{ secrets.wifi_ssid }}
 #          wifi_password: ${{ secrets.wifi_password }}
 #          encryption_key: ${{ secrets.encryption_key }}
