@@ -32,6 +32,26 @@ on:
         required: false
         type: string
         default: ""
+      wifi_ssid:
+        description: Combine all files into a single manifest under this name
+        required: true
+        type: string
+        default: ""
+      wifi_password:
+        description: Combine all files into a single manifest under this name
+        required: true
+        type: string
+        default: ""
+      encryption_key:
+        description: Combine all files into a single manifest under this name
+        required: true
+        type: string
+        default: ""
+      ota_password:
+        description: Combine all files into a single manifest under this name
+        required: true
+        type: string
+        default: ""
 
     outputs:
       version:
@@ -85,10 +105,10 @@ jobs:
           python -c "import os; import yaml; secrets_data = dict(wifi_ssid=os.environ['wifi_ssid'], wifi_password=os.environ['wifi_password'], encryption_key=os.environ['encryption_key'], ota_password=os.environ['ota_password']); secrets_file = open('albionboxes/secrets.yaml', 'w'); yaml.dump(secrets_data, secrets_file, default_flow_style=False); secrets_file.close()"
         shell: bash
         env:
-          wifi_ssid: ${{secrets.wifi_ssid}}
-          wifi_password: ${{secrets.wifi_password}}
-          encryption_key: ${{secrets.encryption_key}}
-          ota_password: ${{secrets.ota_password}}
+          wifi_ssid: ${{ inputs.wifi_ssid }}
+          wifi_password: ${{ inputs.wifi_password }}
+          encryption_key: ${{ inputs.encryption_key }}
+          ota_password: ${{ inputs.ota_password }}
       - name: DEBUG echo the secrets.yaml file
         run: |
           cat albionboxes/secrets.yaml
