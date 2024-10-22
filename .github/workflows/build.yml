@@ -10,6 +10,7 @@ on:
       cache:
         description: Cache build directory
         required: false
+        type: boolean
         default: false
       esphome-version:
         description: Version of ESPHome to build with
