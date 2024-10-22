@@ -91,7 +91,7 @@ jobs:
           ota_password: ${{secrets.ota_password}}
       - name: DEBUG echo the secrets.yaml file
         run: |
-          echo albionboxes/secrets.yaml
+          cat albionboxes/secrets.yaml
         shell: bash
       - name: Replace project version
         run: |
