@@ -32,19 +32,19 @@ on:
         required: false
         type: string
         default: ""
-    secrets:
-      wifi_ssid:
-        description: Combine all files into a single manifest under this name
-        required: true
-      wifi_password:
-        description: Combine all files into a single manifest under this name
-        required: true
-      encryption_key:
-        description: Combine all files into a single manifest under this name
-        required: true
-      ota_password:
-        description: Combine all files into a single manifest under this name
-        required: true
+#    secrets:
+#      wifi_ssid:
+#        description: Combine all files into a single manifest under this name
+#        required: true
+#      wifi_password:
+#        description: Combine all files into a single manifest under this name
+#        required: true
+#      encryption_key:
+#        description: Combine all files into a single manifest under this name
+#        required: true
+#      ota_password:
+#        description: Combine all files into a single manifest under this name
+#        required: true
 
     outputs:
       version:
