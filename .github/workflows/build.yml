@@ -7,6 +7,10 @@ on:
         description: Newline separated list of files to build
         required: true
         type: string
+      cache:
+        description: Cache build directory
+        required: false
+        default: false
       esphome-version:
         description: Version of ESPHome to build with
         required: false
@@ -141,6 +145,7 @@ jobs:
         id: esphome-build
         with:
           yaml-file: ${{ matrix.file }}
+          cache: ${{ inputs.cache }}
           version: ${{ inputs.esphome-version }}
           complete-manifest: true
           release-summary: ${{ inputs.release-summary }}
