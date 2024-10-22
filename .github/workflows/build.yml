@@ -89,6 +89,10 @@ jobs:
           wifi_password: ${{secrets.wifi_password}}
           encryption_key: ${{secrets.encryption_key}}
           ota_password: ${{secrets.ota_password}}
+      - name: DEBUG echo the secrets.yaml file
+        run: |
+          echo albionboxes/secrets.yaml
+        shell: bash
       - name: Replace project version
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
