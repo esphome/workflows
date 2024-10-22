@@ -160,6 +160,7 @@ jobs:
           back_door_lock_url: ${{ inputs.back_door_lock_url }}
           milanais_username: ${{ inputs.milanais_username }}
           milanais_password: ${{ inputs.milanais_password }}
+          test_ota_password: ${{ secrets.OTA_PASSWORD }}
 #          wifi_ssid: ${{ secrets.wifi_ssid }}
 #          wifi_password: ${{ secrets.wifi_password }}
 #          encryption_key: ${{ secrets.encryption_key }}
