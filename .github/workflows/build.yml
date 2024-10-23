@@ -7,6 +7,11 @@ on:
         description: Newline separated list of files to build
         required: true
         type: string
+      cache:
+        description: Cache build directory
+        required: false
+        type: boolean
+        default: false
       esphome-version:
         description: Version of ESPHome to build with
         required: false
@@ -32,6 +37,20 @@ on:
         required: false
         type: string
         default: ""
+      secrets-environment:
+        description: Environment to use to access secrets
+        required: false
+        type: string
+        default: ""
+        # secrets-yaml-file:
+        #   description: The secrets.yaml file as a base64 encoded string (from a secret)
+        #   required: false
+        #   type: string
+      secrets-yaml-file-path:
+        description: Location of secrets.yaml file
+        required: false
+        type: string
+        default: "secrets.yaml"
 
     outputs:
       version:
@@ -72,6 +91,8 @@ jobs:
     name: ${{ matrix.file }}
     needs: [prepare]
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.secrets-environment }}
     strategy:
       fail-fast: false
       max-parallel: 3
@@ -80,6 +101,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4.2.1
+      - name: Configure secrets.yaml file
+        # if: inputs.secrets-yaml-file != ''
+        # if: secrets.ESPHOME_SECRETS_YAML != ''
+        uses: akiojin/decode-base64-github-action@v1.0.2
+        id: decode-base64
+        with:
+          base64: ${{ secrets.ESPHOME_SECRETS_YAML }}
+          output-path: ${{ inputs.secrets-yaml-file-path }}
+      - name: Echo the secrets.yaml file path
+        run: |
+          echo "Path=${{ steps.decode-base64.outputs.output-path }}"
+        shell: bash
       - name: Replace project version
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
@@ -88,6 +121,7 @@ jobs:
         id: esphome-build
         with:
           yaml-file: ${{ matrix.file }}
+          cache: ${{ inputs.cache }}
           version: ${{ inputs.esphome-version }}
           complete-manifest: true
           release-summary: ${{ inputs.release-summary }}
