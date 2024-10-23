@@ -103,7 +103,7 @@ jobs:
         uses: actions/checkout@v4.2.1
       - name: Configure secrets.yaml file
         # if: inputs.secrets-yaml-file != ''
-        if: secrets.ESPHOME_SECRETS_YAML != ''
+        # if: secrets.ESPHOME_SECRETS_YAML != ''
         uses: akiojin/decode-base64-github-action@v1
         id: decode-base64
         with:
