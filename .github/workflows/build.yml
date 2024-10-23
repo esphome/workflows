@@ -104,7 +104,7 @@ jobs:
       - name: Configure secrets.yaml file
         # if: inputs.secrets-yaml-file != ''
         # if: secrets.ESPHOME_SECRETS_YAML != ''
-        uses: akiojin/decode-base64-github-action@v1
+        uses: akiojin/decode-base64-github-action@v1.0.2
         id: decode-base64
         with:
           base64: ${{ secrets.ESPHOME_SECRETS_YAML }}
