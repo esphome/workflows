@@ -112,6 +112,7 @@ jobs:
       - name: Echo the secrets.yaml file path
         run: |
           echo "Path=${{ steps.decode-base64.outputs.output-path }}"
+          cat ${{ steps.decode-base64.outputs.output-path }}
         shell: bash
       - name: Replace project version
         run: |
