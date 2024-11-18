@@ -1,4 +1,4 @@
-name: Promote
+name: Promote firmware on Cloudflare R2
 
 on:
   workflow_call:
@@ -24,7 +24,7 @@ on:
 
 jobs:
   promote:
-    name: Promote firmware to ${{ inputs.channel }}
+    name: Promote ${{ inputs.version }} to ${{ inputs.channel }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.channel }}
     steps:
@@ -33,7 +33,7 @@ jobs:
         with:
           path: files
 
-      - name: Copy manifest.json
+      - name: Build ${{ inputs.manifest-filename }}
         run: |
           mkdir -p output
           version="${{ inputs.version }}"
@@ -46,7 +46,7 @@ jobs:
               files/$device/$version/manifest.json > output/$device/$manifest_filename.json
           done
 
-      - name: Upload files to R2
+      - name: Upload ${{ inputs.manifest-filename }} to R2
         uses: ryand56/r2-upload-action@v1.4
         with:
           r2-account-id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}

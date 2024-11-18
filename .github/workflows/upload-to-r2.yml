@@ -1,4 +1,4 @@
-name: Upload
+name: Upload firmware to Cloudflare R2
 # This workflow is only to be used within the ESPHome organisation on GitHub.
 # It is used to build and upload the binaries to Cloudflare R2 and only
 # specific repositories will be granted the secrets required to do so.
@@ -13,7 +13,7 @@ on:
 
 jobs:
   upload:
-    name: Upload firmware to Cloudflare R2
+    name: Upload
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
