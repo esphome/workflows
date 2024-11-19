@@ -43,7 +43,7 @@ jobs:
             mkdir -p output/$device
             jq --arg version "$version" \
               '.builds[].ota.path |= $version + "/" + . | (.builds[].parts // [])[].path |= $version + "/" + .' \
-              files/$device/$version/manifest.json > output/$device/$manifest_filename.json
+              files/$device/$version/manifest.json > output/$device/$manifest_filename
           done
 
       - name: Upload ${{ inputs.manifest-filename }} to R2
