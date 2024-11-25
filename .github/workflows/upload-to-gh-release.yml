@@ -22,6 +22,7 @@ jobs:
 
       - name: Copy files to output
         run: |-
+          shopt -s nullglob
           mkdir output
           version="${{ inputs.version }}"
           pushd files
@@ -29,7 +30,7 @@ jobs:
             pushd $device
             pushd $version
             cp manifest.json ../../../output/$device.manifest.json
-            for bin in *.bin; do
+            for bin in *.{bin,elf}; do
               md5sum $bin | head -c 32 > ../../../output/$bin.md5
               cp $bin ../../../output/
             done
