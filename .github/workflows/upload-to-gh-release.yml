@@ -22,6 +22,7 @@ jobs:
 
       - name: Copy files to output
         run: |-
+          shopt -s nullglob
           mkdir output
           version="${{ inputs.version }}"
           pushd files
