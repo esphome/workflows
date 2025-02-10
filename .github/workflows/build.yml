@@ -100,7 +100,7 @@ jobs:
         file: ${{ fromJson(needs.prepare.outputs.files) }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4.2.1
+        uses: actions/checkout@v4.2.2
       - name: Configure secrets.yaml file
         # if: inputs.secrets-yaml-file != ''
         # if: secrets.ESPHOME_SECRETS_YAML != ''
@@ -117,7 +117,7 @@ jobs:
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
       - name: Build Firmware
-        uses: esphome/build-action@v4.0.3
+        uses: esphome/build-action@v6.0.0
         id: esphome-build
         with:
           yaml-file: ${{ matrix.file }}
@@ -131,7 +131,7 @@ jobs:
           mkdir -p output/${{ needs.prepare.outputs.version }}
           mv ${{ steps.esphome-build.outputs.name }}/* output/${{ needs.prepare.outputs.version }}/
       - name: Upload artifact
-        uses: actions/upload-artifact@v4.3.4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: ${{ inputs.combined-name != '' && format('{0}-{1}', needs.prepare.outputs.artifact-prefix, steps.esphome-build.outputs.name) || steps.esphome-build.outputs.original-name }}
           path: output
@@ -159,7 +159,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Delete prefixed artifacts
-        uses: geekyeggo/delete-artifact@v5.0.0
+        uses: geekyeggo/delete-artifact@v5.1.0
         with:
           name: ${{ steps.artifacts.outputs.artifacts }}
 
@@ -179,7 +179,7 @@ jobs:
           jq -s '(.[0] | del(.builds)) + {"builds": (reduce .[].builds as $b ([]; . + $b))}' files/*/$version/manifest.json > output/$version/manifest.json
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4.3.4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: ${{ inputs.combined-name }}
           path: output

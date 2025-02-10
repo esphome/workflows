@@ -1,0 +1,34 @@
+name: Upload firmware to Cloudflare R2
+# This workflow is only to be used within the ESPHome organisation on GitHub.
+# It is used to build and upload the binaries to Cloudflare R2 and only
+# specific repositories will be granted the secrets required to do so.
+
+on:
+  workflow_call:
+    inputs:
+      directory:
+        description: Directory to upload to
+        required: true
+        type: string
+
+jobs:
+  upload:
+    name: Upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.1.8
+        with:
+          path: files
+
+      - run: tree
+
+      - name: Upload files to R2
+        uses: ryand56/r2-upload-action@v1.4
+        with:
+          r2-account-id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          source-dir: files
+          destination-dir: ${{ inputs.directory }}/

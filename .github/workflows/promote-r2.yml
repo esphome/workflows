@@ -1,0 +1,57 @@
+name: Promote firmware on Cloudflare R2
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version of the firmware to promote
+        required: true
+        type: string
+      directory:
+        description: Directory to promote the firmware to
+        required: true
+        type: string
+      channel:
+        description: Channel to upload to. "beta" or "production"
+        required: false
+        type: string
+        default: "production"
+      manifest-filename:
+        description: Filename of the manifest to write.
+        required: false
+        type: string
+        default: manifest.json
+
+jobs:
+  promote:
+    name: Promote ${{ inputs.version }} to ${{ inputs.channel }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.channel }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.1.8
+        with:
+          path: files
+
+      - name: Build ${{ inputs.manifest-filename }}
+        run: |
+          mkdir -p output
+          version="${{ inputs.version }}"
+          manifest_filename="${{ inputs.manifest-filename }}"
+          for device in files/*; do
+            device=$(basename $device)
+            mkdir -p output/$device
+            jq --arg version "$version" \
+              '.builds[].ota.path |= $version + "/" + . | (.builds[].parts // [])[].path |= $version + "/" + .' \
+              files/$device/$version/manifest.json > output/$device/$manifest_filename
+          done
+
+      - name: Upload ${{ inputs.manifest-filename }} to R2
+        uses: ryand56/r2-upload-action@v1.4
+        with:
+          r2-account-id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          source-dir: output
+          destination-dir: ${{ inputs.directory }}/
