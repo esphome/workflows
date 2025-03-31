@@ -127,7 +127,7 @@ jobs:
           release-summary: ${{ inputs.release-summary }}
           release-url: ${{ inputs.release-url }}
       - if: ${{ inputs.cache == true || inputs.cache == 'true' }}
-        name: Restore cache directory
+        name: Save build cache directory
         id: cache-build-save
         uses: actions/cache/save@v4.2.3
         with:
