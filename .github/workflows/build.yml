@@ -41,7 +41,7 @@ on:
         description: Location of secrets.yaml file
         required: false
         type: string
-        default: "$(dirname ${{ matrix.file }})/secrets.yaml"
+        default: $(dirname ${{ matrix.file }})/secrets.yaml
 
     outputs:
       version:
