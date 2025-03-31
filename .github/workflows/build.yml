@@ -37,11 +37,6 @@ on:
         required: false
         type: string
         default: ""
-      secrets-yaml-file-path:
-        description: Location of secrets.yaml file
-        required: false
-        type: string
-        default: $(dirname ${{ matrix.file }})/secrets.yaml
 
     outputs:
       version:
@@ -96,7 +91,7 @@ jobs:
         # if: inputs.secrets-yaml-file != ''
         # if: secrets.ESPHOME_SECRETS_YAML != ''
         id: decode-base64
-        run: echo "${{ secrets.ESPHOME_SECRETS_YAML }}" | base64 -d > ${{ inputs.secrets-yaml-file-path }}
+        run: echo "${{ secrets.ESPHOME_SECRETS_YAML }}" | base64 -d > $(dirname ${{ matrix.file }})/secrets.yaml
       - name: Echo the secrets.yaml file path
         run: |
           echo "Path=${{ steps.decode-base64.outputs.output-path }}"
