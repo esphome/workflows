@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: ""
+      secrets-environment:
+        description: Environment to use to access secrets
+        required: false
+        type: string
+        default: ""
 
     outputs:
       version:
@@ -72,6 +77,8 @@ jobs:
     name: ${{ matrix.file }}
     needs: [prepare]
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.secrets-environment }}
     strategy:
       fail-fast: false
       max-parallel: 3
@@ -80,6 +87,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4.2.2
+      - name: Configure secrets.yaml file
+        if: ${{ inputs.secrets-environment != '' }}
+        id: decode-base64
+        run: echo "${{ secrets.ESPHOME_SECRETS_YAML }}" | base64 -d > $(dirname ${{ matrix.file }})/secrets.yaml
       - name: Replace project version
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
