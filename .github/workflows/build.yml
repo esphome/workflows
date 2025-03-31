@@ -99,25 +99,16 @@ jobs:
           data_dir=$(dirname ${{ matrix.file }})/.esphome
           echo "data_dir=$data_dir" >> $GITHUB_OUTPUT
       - if: ${{ inputs.cache == true || inputs.cache == 'true' }}
-        name: Cache platformio directory
-        uses: actions/cache@v4.2.3
+        name: Restore build cache directory
+        id: cache-build-restore
+        uses: actions/cache/restore@v4.2.3
         with:
-          path: ~/.platformio
-          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-platformio
-      - if: ${{ inputs.cache == true || inputs.cache == 'true' }}
-        name: Cache build directory
-        uses: actions/cache@v4.2.3
-        with:
-          path: ${{ steps.data-dir.outputs.data_dir }}/build
+          path: |
+            ~/.esphome
+            ~/.platformio
+            ${{ steps.data-dir.outputs.data_dir }}/build
+            ${{ steps.data-dir.outputs.data_dir }}/storage
           key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-build
-          save-always: true
-      - if: ${{ inputs.cache == true || inputs.cache == 'true' }}
-        name: Cache storage directory
-        uses: actions/cache@v4.2.3
-        with:
-          path: ${{ steps.data-dir.outputs.data_dir }}/storage
-          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-storage
-          save-always: true
       - name: Configure secrets.yaml file
         # if: inputs.secrets-yaml-file != ''
         # if: secrets.ESPHOME_SECRETS_YAML != ''
@@ -139,6 +130,17 @@ jobs:
           complete-manifest: true
           release-summary: ${{ inputs.release-summary }}
           release-url: ${{ inputs.release-url }}
+      - if: ${{ inputs.cache == true || inputs.cache == 'true' }}
+        name: Restore cache directory
+        id: cache-build-save
+        uses: actions/cache/save@v4.2.3
+        with:
+          path: |
+            ~/.esphome
+            ~/.platformio
+            ${{ steps.data-dir.outputs.data_dir }}/build
+            ${{ steps.data-dir.outputs.data_dir }}/storage
+          key: ${{ steps.cache-build-restore.outputs.cache-primary-key }}
       - name: Move files for versioning
         run: |
           mkdir -p output/${{ needs.prepare.outputs.version }}
