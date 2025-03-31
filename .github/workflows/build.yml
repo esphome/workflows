@@ -110,8 +110,7 @@ jobs:
             ${{ steps.data-dir.outputs.data_dir }}/storage
           key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-build
       - name: Configure secrets.yaml file
-        # if: inputs.secrets-yaml-file != ''
-        # if: secrets.ESPHOME_SECRETS_YAML != ''
+        if: ${{ inputs.secrets-environment != '' }}
         id: decode-base64
         run: echo "${{ secrets.ESPHOME_SECRETS_YAML }}" | base64 -d > $(dirname ${{ matrix.file }})/secrets.yaml
       - name: Replace project version
