@@ -37,6 +37,11 @@ on:
         required: false
         type: string
         default: ""
+      cache:
+        description: Cache build directory
+        required: false
+        type: boolean
+        default: false
 
     outputs:
       version:
@@ -87,6 +92,32 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4.2.2
+      - if: ${{ inputs.cache == 'true' }}
+        id: data-dir
+        shell: bash
+        run: |
+          data_dir=$(dirname ${{ matrix.file }})/.esphome
+          echo "data_dir=$data_dir" >> $GITHUB_OUTPUT
+      - if: ${{ inputs.cache == 'true' }}
+        name: Cache platformio directory
+        uses: actions/cache@v4.2.3
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-platformio
+      - if: ${{ inputs.cache == 'true' }}
+        name: Cache build directory
+        uses: actions/cache@v4.2.3
+        with:
+          path: ${{ steps.data-dir.outputs.data_dir }}/build
+          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-build
+          save-always: true
+      - if: ${{ inputs.cache == 'true' }}
+        name: Cache storage directory
+        uses: actions/cache@v4.2.3
+        with:
+          path: ${{ steps.data-dir.outputs.data_dir }}/storage
+          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-storage
+          save-always: true
       - name: Configure secrets.yaml file
         # if: inputs.secrets-yaml-file != ''
         # if: secrets.ESPHOME_SECRETS_YAML != ''
