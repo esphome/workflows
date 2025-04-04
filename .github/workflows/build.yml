@@ -101,7 +101,10 @@ jobs:
             ~/.platformio
             ${{ steps.data-dir.outputs.data_dir }}/build
             ${{ steps.data-dir.outputs.data_dir }}/storage
-          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-build
+          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}
+          restore-keys: |
+            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}
+            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-
       - name: Replace project version
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
