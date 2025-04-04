@@ -108,9 +108,9 @@ jobs:
             ~/.platformio
             ${{ steps.data-dir.outputs.data_dir }}/build
             ${{ steps.data-dir.outputs.data_dir }}/storage
-          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.head_ref }}
+          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}
           restore-keys: |
-            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.head_ref }}
+            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}
             ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-
       - name: Configure secrets.yaml file
         if: ${{ inputs.secrets-environment != '' }}
