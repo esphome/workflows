@@ -104,13 +104,12 @@ jobs:
         uses: actions/cache/restore@v4.2.3
         with:
           path: |
-            ~/.esphome
             ~/.platformio
-            ${{ steps.data-dir.outputs.data_dir }}/build
-            ${{ steps.data-dir.outputs.data_dir }}/storage
-          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}
+            ${{ steps.data-dir.outputs.data_dir }}
+          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}-${{ hashFiles('**/.esphome/build/**/dependencies.lock') }}
           restore-keys: |
-            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}
+            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}-${{ hashFiles('**/.esphome/build/**/dependencies.lock') }}
+            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}-
             ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-
       - name: Configure secrets.yaml file
         if: ${{ inputs.secrets-environment != '' }}
@@ -134,10 +133,8 @@ jobs:
         uses: actions/cache/save@v4.2.3
         with:
           path: |
-            ~/.esphome
             ~/.platformio
-            ${{ steps.data-dir.outputs.data_dir }}/build
-            ${{ steps.data-dir.outputs.data_dir }}/storage
+            ${{ steps.data-dir.outputs.data_dir }}
           key: ${{ steps.cache-build-restore.outputs.cache-primary-key }}
       - name: Move files for versioning
         run: |
