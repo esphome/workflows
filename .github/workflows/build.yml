@@ -108,7 +108,7 @@ jobs:
             ${{ steps.data-dir.outputs.data_dir }}
           key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}-${{ hashFiles('**/.esphome/build/**/dependencies.lock') }}
           restore-keys: |
-            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}-${{ hashFiles('**/.esphome/build/**/dependencies.lock') }}
+            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}-${{ hashFiles('*.yaml', '*.yml', '**/*.yaml', '**/*.yml) }}
             ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}-
             ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-
       - name: Configure secrets.yaml file
