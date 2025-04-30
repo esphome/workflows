@@ -84,7 +84,7 @@ jobs:
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
       - name: Build Firmware
-        uses: esphome/build-action@v6.0.0
+        uses: esphome/build-action@v7.0.0
         id: esphome-build
         with:
           yaml-file: ${{ matrix.file }}
