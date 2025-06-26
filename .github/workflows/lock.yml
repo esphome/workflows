@@ -7,12 +7,12 @@ on:
       pr-close-days:
         description: Number of days after which closed PRs should be locked
         required: false
-        type: integer
+        type: number
         default: 1
       issue-close-days:
         description: Number of days after which closed issues should be locked
         required: false
-        type: integer
+        type: number
         default: 7
       exclude-label:
         description: Label to exclude from locking
@@ -27,7 +27,7 @@ on:
       since-days:
         description: Number of days since which issues and PRs should be locked
         required: false
-        type: integer
+        type: number
         default: 30
 
 permissions:
