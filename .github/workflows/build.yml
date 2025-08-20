@@ -136,9 +136,13 @@ jobs:
           pushd files
           for device in *; do
             pushd $device
-            pushd $version
-            cp * "../../../output/$version/"
-            popd
+            if [ "$device" != "$version" ]; then
+              pushd $version
+              cp * "../../../output/$version/"
+              popd
+            else
+              cp * "../../output/$version/"
+            fi
             popd
           done
           popd

@@ -28,14 +28,23 @@ jobs:
           pushd files
           for device in *; do
             pushd $device
-            pushd $version
-            cp manifest.json ../../../output/$device.manifest.json
-            for bin in *.{bin,elf}; do
-              md5sum $bin | head -c 32 > ../../../output/$bin.md5
-              sha256sum $bin | head -c 64 > ../../../output/$bin.sha256
-              cp $bin ../../../output/
-            done
-            popd
+            if [ "$device" != "$version" ]; then
+              pushd $version
+              cp manifest.json ../../../output/$device.manifest.json
+              for bin in *.{bin,elf}; do
+                md5sum $bin | head -c 32 > ../../../output/$bin.md5
+                sha256sum $bin | head -c 64 > ../../../output/$bin.sha256
+                cp $bin ../../../output/
+              done
+              popd
+            else
+              cp manifest.json ../../output/$device.manifest.json
+              for bin in *.{bin,elf}; do
+                md5sum $bin | head -c 32 > ../../output/$bin.md5
+                sha256sum $bin | head -c 64 > ../../output/$bin.sha256
+                cp $bin ../../output/
+              done
+            fi
             popd
           done
           popd
