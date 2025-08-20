@@ -84,7 +84,7 @@ jobs:
         file: ${{ fromJson(needs.prepare.outputs.files) }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v5.0.0
       - if: ${{ inputs.cache == true || inputs.cache == 'true' }}
         id: data-dir
         shell: bash
@@ -147,7 +147,7 @@ jobs:
     if: inputs.combined-name != ''
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4.3.0
+        uses: actions/download-artifact@v5.0.0
         with:
           path: files
           pattern: ${{ needs.prepare.outputs.artifact-prefix }}-*
