@@ -30,20 +30,18 @@ jobs:
             pushd $device
             if [ "$device" != "$version" ]; then
               pushd $version
-              cp manifest.json ../../../output/$device.manifest.json
-              for bin in *.{bin,elf}; do
-                md5sum $bin | head -c 32 > ../../../output/$bin.md5
-                sha256sum $bin | head -c 64 > ../../../output/$bin.sha256
-                cp $bin ../../../output/
-              done
-              popd
+              output_path="../../../output/"
             else
-              cp manifest.json ../../output/$device.manifest.json
-              for bin in *.{bin,elf}; do
-                md5sum $bin | head -c 32 > ../../output/$bin.md5
-                sha256sum $bin | head -c 64 > ../../output/$bin.sha256
-                cp $bin ../../output/
-              done
+              output_path="../../output/"
+            fi
+            cp manifest.json "${output_path}$device.manifest.json"
+            for bin in *.{bin,elf}; do
+              md5sum $bin | head -c 32 > "${output_path}$bin.md5"
+              sha256sum $bin | head -c 64 > "${output_path}$bin.sha256"
+              cp $bin "$output_path"
+            done
+            if [ "$device" != "$version" ]; then
+              popd
             fi
             popd
           done

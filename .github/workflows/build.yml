@@ -138,10 +138,13 @@ jobs:
             pushd $device
             if [ "$device" != "$version" ]; then
               pushd $version
-              cp * "../../../output/$version/"
-              popd
+              output_path="../../../output/$version/"
             else
-              cp * "../../output/$version/"
+              output_path="../../output/$version/"
+            fi
+            cp * "$output_path"
+            if [ "$device" != "$version" ]; then
+              popd
             fi
             popd
           done
