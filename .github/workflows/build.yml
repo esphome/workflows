@@ -86,7 +86,7 @@ jobs:
         file: ${{ fromJson(needs.prepare.outputs.files) }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v5.0.0
       - name: Configure secrets.yaml file
         if: ${{ inputs.secrets-environment != '' }}
         id: decode-base64
@@ -122,7 +122,7 @@ jobs:
     if: inputs.combined-name != ''
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4.3.0
+        uses: actions/download-artifact@v5.0.0
         with:
           path: files
           pattern: ${{ needs.prepare.outputs.artifact-prefix }}-*
