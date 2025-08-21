@@ -1,0 +1,137 @@
+---
+name: Bump ESPHome Version
+
+on:
+  workflow_call:
+    inputs:
+      esphome-version:
+        description: New ESPHome version to bump to
+        required: true
+        type: string
+      pr-title:
+        description: Title for the pull request
+        required: false
+        type: string
+        default: "Bump ESPHome to {version}"
+      pr-body:
+        description: Body for the pull request
+        required: false
+        type: string
+        default: "Automatically bump ESPHome version to {version}"
+      branch-name:
+        description: Name of the branch to create for the PR
+        required: false
+        type: string
+        default: "bump-esphome-{version}"
+
+jobs:
+  bump-version:
+    name: Bump ESPHome Version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5.0.0
+
+      - name: Setup variables
+        id: vars
+        run: |
+          VERSION="${{ inputs.esphome-version }}"
+          BRANCH_NAME="${{ inputs.branch-name }}"
+          PR_TITLE="${{ inputs.pr-title }}"
+          PR_BODY="${{ inputs.pr-body }}"
+
+          # Replace {version} placeholder with actual version
+          BRANCH_NAME="${BRANCH_NAME/\{version\}/$VERSION}"
+          PR_TITLE="${PR_TITLE/\{version\}/$VERSION}"
+          PR_BODY="${PR_BODY/\{version\}/$VERSION}"
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "pr-title=$PR_TITLE" >> $GITHUB_OUTPUT
+          echo "pr-body=$PR_BODY" >> $GITHUB_OUTPUT
+
+      - name: Create and checkout branch
+        run: |
+          git config user.name "esphomebot"
+          git config user.email "esphome@openhomefoundation.org"
+          git checkout -b "${{ steps.vars.outputs.branch-name }}"
+
+      - name: Find and update workflow files
+        id: update-files
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+
+          # Find all YAML workflow files
+          find .github/workflows -name "*.yml" -o -name "*.yaml" | \
+          while read -r file; do
+            if grep -q "esphome-version:" "$file"; then
+              echo "Updating $file"
+              # Use sed to update the esphome-version field
+              sed -i "s/esphome-version: [^[:space:]]*/esphome-version: $VERSION/g" "$file"
+            fi
+          done
+
+          # Check if any files were modified
+          if git diff --quiet; then
+            echo "No files were modified"
+            echo "files-updated=false" >> $GITHUB_OUTPUT
+          else
+            echo "Files were modified"
+            echo "files-updated=true" >> $GITHUB_OUTPUT
+            git add .github/workflows/
+          fi
+
+      - name: Commit changes
+        if: steps.update-files.outputs.files-updated == 'true'
+        run: |
+          git commit -m "${{ steps.vars.outputs.pr-title }}"
+          git push origin "${{ steps.vars.outputs.branch-name }}"
+
+      - name: Create Pull Request
+        id: create-pr
+        if: steps.update-files.outputs.files-updated == 'true'
+        uses: actions/github-script@v7.0.1
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '${{ steps.vars.outputs.pr-title }}',
+              body: '${{ steps.vars.outputs.pr-body }}',
+              head: '${{ steps.vars.outputs.branch-name }}',
+              base: context.payload.repository.default_branch
+            });
+
+            console.log(`Created pull request #${pr.number}: ${pr.html_url}`);
+
+            // Set environment variables for the summary
+            core.exportVariable('PR_NUMBER', pr.number);
+            core.exportVariable('PR_URL', pr.html_url);
+
+      - name: Output summary
+        if: steps.update-files.outputs.files-updated == 'true'
+        run: |
+          echo "## ESPHome Version Bump Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Successfully updated ESPHome version to **${{ steps.vars.outputs.version }}**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Pull Request:** [#${PR_NUMBER}](${PR_URL})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ steps.vars.outputs.branch-name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Modified Files:**" >> $GITHUB_STEP_SUMMARY
+          git diff --name-only HEAD~1 | while read -r file; do
+            echo "- \`$file\`" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: No changes summary
+        if: steps.update-files.outputs.files-updated == 'false'
+        run: |
+          echo "## ESPHome Version Bump Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ℹ️ No workflow files found with \`esphome-version\` field to update." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Version:** ${{ steps.vars.outputs.version }}" >> $GITHUB_STEP_SUMMARY
