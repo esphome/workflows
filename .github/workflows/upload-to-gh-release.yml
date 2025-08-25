@@ -20,6 +20,10 @@ jobs:
         with:
           path: files
 
+      - name: Tree
+        run: |-
+          tree
+
       - name: Copy files to output
         run: |-
           shopt -s nullglob
