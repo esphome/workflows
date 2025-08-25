@@ -11,6 +11,8 @@ This repository contains workflows to be used by other repositories.
 - `promote-r2.yml` - Promote R2 releases
 - `lock.yml` - Lock workflow
 
+### Version Management
+- `bump-esphome-version.yml` - Automatically bump ESPHome version in workflow files and create pull requests
 
 ## Usage
 
