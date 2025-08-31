@@ -16,9 +16,13 @@ jobs:
       contents: write
     steps:
       - name: Download Artifact
-        uses: actions/download-artifact@v5.0.0
+        uses: actions/download-artifact@v4.3.0
         with:
           path: files
+
+      - name: Tree
+        run: |-
+          tree
 
       - name: Copy files to output
         run: |-
@@ -28,14 +32,21 @@ jobs:
           pushd files
           for device in *; do
             pushd $device
-            pushd $version
-            cp manifest.json ../../../output/$device.manifest.json
+            if [ "$device" != "$version" ]; then
+              pushd $version
+              output_path="../../../output/"
+            else
+              output_path="../../output/"
+            fi
+            cp manifest.json "${output_path}$device.manifest.json"
             for bin in *.{bin,elf}; do
-              md5sum $bin | head -c 32 > ../../../output/$bin.md5
-              sha256sum $bin | head -c 64 > ../../../output/$bin.sha256
-              cp $bin ../../../output/
+              md5sum $bin | head -c 32 > "${output_path}$bin.md5"
+              sha256sum $bin | head -c 64 > "${output_path}$bin.sha256"
+              cp $bin "$output_path"
             done
-            popd
+            if [ "$device" != "$version" ]; then
+              popd
+            fi
             popd
           done
           popd
