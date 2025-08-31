@@ -135,6 +135,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4.6.2
         with:
+          # yamllint disable-line rule:line-length
           name: ${{ inputs.combined-name != '' && format('{0}-{1}', needs.prepare.outputs.artifact-prefix, steps.esphome-build.outputs.name) || steps.esphome-build.outputs.original-name }}
           path: output
 
@@ -147,7 +148,7 @@ jobs:
     if: inputs.combined-name != ''
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v5.0.0
+        uses: actions/download-artifact@v4.3.0
         with:
           path: files
           pattern: ${{ needs.prepare.outputs.artifact-prefix }}-*
@@ -178,7 +179,8 @@ jobs:
             popd
           done
           popd
-          jq -s '(.[0] | del(.builds)) + {"builds": (reduce .[].builds as $b ([]; . + $b))}' files/*/$version/manifest.json > output/$version/manifest.json
+          jq -s '(.[0] | del(.builds)) + {"builds": (reduce .[].builds as $b ([]; . + $b))}' \
+            files/*/$version/manifest.json > output/$version/manifest.json
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4.6.2
