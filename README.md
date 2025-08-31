@@ -11,6 +11,7 @@ This repository contains workflows to be used by other repositories.
 - `promote-r2.yml` - Promote R2 releases
 - `lock.yml` - Lock workflow
 
+
 ## Usage
 
 See https://github.com/esphome/esphome-project-template for usage of these workflows.
