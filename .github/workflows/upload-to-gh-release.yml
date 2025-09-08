@@ -52,7 +52,7 @@ jobs:
           popd
 
       - name: Upload files to release
-        uses: softprops/action-gh-release@v2.3.2
+        uses: softprops/action-gh-release@v2.3.3
         with:
           files: output/*
           tag_name: ${{ inputs.version }}
