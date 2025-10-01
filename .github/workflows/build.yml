@@ -32,6 +32,16 @@ on:
         required: false
         type: string
         default: ""
+      secrets-environment:
+        description: Environment to use to access secrets
+        required: false
+        type: string
+        default: ""
+      cache:
+        description: Cache build directory
+        required: false
+        type: boolean
+        default: false
 
     outputs:
       version:
@@ -72,6 +82,8 @@ jobs:
     name: ${{ matrix.file }}
     needs: [prepare]
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.secrets-environment }}
     strategy:
       fail-fast: false
       max-parallel: 3
@@ -80,6 +92,30 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5.0.0
+      - if: ${{ inputs.cache == true || inputs.cache == 'true' }}
+        id: data-dir
+        shell: bash
+        run: |
+          data_dir=$(dirname ${{ matrix.file }})/.esphome
+          echo "data_dir=$data_dir" >> $GITHUB_OUTPUT
+      - if: ${{ inputs.cache == true || inputs.cache == 'true' }}
+        name: Restore build cache directory
+        id: cache-build-restore
+        uses: actions/cache/restore@v4.2.3
+        with:
+          path: |
+            ~/.esphome
+            ~/.platformio
+            ${{ steps.data-dir.outputs.data_dir }}/build
+            ${{ steps.data-dir.outputs.data_dir }}/storage
+          key: ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}
+          restore-keys: |
+            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-${{ github.ref }}
+            ${{ runner.os }}-esphome-${{ matrix.file }}-${{ inputs.esphome-version }}-
+      - name: Configure secrets.yaml file
+        if: ${{ inputs.secrets-environment != '' }}
+        id: decode-base64
+        run: echo "${{ secrets.ESPHOME_SECRETS_YAML }}" | base64 -d > $(dirname ${{ matrix.file }})/secrets.yaml
       - name: Replace project version
         run: |
           sed -i "s/version: dev/version: ${{ needs.prepare.outputs.version }}/g" ${{ matrix.file }}
@@ -92,6 +128,17 @@ jobs:
           complete-manifest: true
           release-summary: ${{ inputs.release-summary }}
           release-url: ${{ inputs.release-url }}
+      - if: ${{ inputs.cache == true || inputs.cache == 'true' }}
+        name: Save build cache directory
+        id: cache-build-save
+        uses: actions/cache/save@v4.2.3
+        with:
+          path: |
+            ~/.esphome
+            ~/.platformio
+            ${{ steps.data-dir.outputs.data_dir }}/build
+            ${{ steps.data-dir.outputs.data_dir }}/storage
+          key: ${{ steps.cache-build-restore.outputs.cache-primary-key }}
       - name: Move files for versioning
         run: |
           mkdir -p output/${{ needs.prepare.outputs.version }}
