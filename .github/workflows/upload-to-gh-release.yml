@@ -7,6 +7,11 @@ on:
         description: Version of the release
         required: true
         type: string
+      draft:
+        description: Upload to a draft release only
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   upload:
@@ -52,7 +57,18 @@ jobs:
           popd
 
       - name: Upload files to release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
-        with:
-          files: output/*
-          tag_name: ${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          DRAFT: ${{ inputs.draft }}
+        run: |-
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" output/* --clobber
+          else
+            draft_flag=()
+            if [ "$DRAFT" = "true" ]; then
+              draft_flag=(--draft)
+            fi
+            gh release create "$VERSION" output/* --title "$VERSION" "${draft_flag[@]}"
+          fi
