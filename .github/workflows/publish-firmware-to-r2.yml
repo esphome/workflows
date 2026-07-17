@@ -1,0 +1,238 @@
+name: Publish Firmware to Cloudflare R2
+# The `release: published` half of the pipeline: downloads the release's
+# firmware assets, reconstructs the artifact layout the R2 workflows expect
+# and uploads/promotes the firmware on https://firmware.esphome.io/.
+# This workflow is only to be used within the ESPHome organisation on
+# GitHub: the nested R2 workflows need the Cloudflare secrets, so it must be
+# called with `secrets: inherit`.
+
+on:
+  workflow_call:
+    inputs:
+      directory:
+        description: >-
+          Directory on https://firmware.esphome.io/ to publish to. Defaults
+          to the FIRMWARE_DIRECTORY repository variable if set, then to the
+          repository name singularized (e.g. rf-proxies -> rf-proxy).
+        required: false
+        type: string
+        default: ""
+      tag:
+        description: >-
+          Release tag to publish. Defaults to the release that triggered the
+          workflow; set it when re-publishing via workflow_dispatch.
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  discover-devices:
+    name: Discover devices in release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+      directory: ${{ steps.directory.outputs.directory }}
+      version: ${{ steps.release.outputs.tag }}
+      release-id: ${{ steps.release.outputs.release_id }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+    steps:
+      - name: Determine firmware directory
+        id: directory
+        env:
+          INPUT_DIRECTORY: ${{ inputs.directory }}
+          # Set a `FIRMWARE_DIRECTORY` repository variable (or pass the
+          # `directory` input) to override the default, which is the
+          # repository name singularized (e.g. rf-proxies -> rf-proxy,
+          # media-players -> media-player). This is the directory used on
+          # https://firmware.esphome.io/ and must match the `update.source`
+          # URLs in the factory YAML files.
+          OVERRIDE: ${{ vars.FIRMWARE_DIRECTORY }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          repo_name="${GH_REPO#*/}"
+          directory="${INPUT_DIRECTORY:-${OVERRIDE}}"
+          if [[ -z "${directory}" ]]; then
+            if [[ "${repo_name}" == *ies ]]; then
+              directory="${repo_name%ies}y"
+            else
+              directory="${repo_name%s}"
+            fi
+          fi
+          echo "directory=${directory}" >> "$GITHUB_OUTPUT"
+          echo "Firmware directory: ${directory}"
+
+      - name: Resolve release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_RELEASE_ID: ${{ github.event.release.id }}
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          EVENT_RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INPUT_TAG}" ]]; then
+            # Resolve via the releases list rather than the singular
+            # releases/tags/{tag} endpoint, which has proven unreliable;
+            # everything downstream operates by id.
+            if ! releases=$(gh api "repos/${GH_REPO}/releases?per_page=100"); then
+              echo "::error::Failed to list releases"
+              exit 1
+            fi
+            release=$(jq --arg tag "${INPUT_TAG}" \
+              '[.[] | select(.tag_name == $tag and .draft == false)] | first' <<< "${releases}")
+            if [[ -z "${release}" || "${release}" == "null" ]]; then
+              echo "::error::Published release ${INPUT_TAG} not found"
+              exit 1
+            fi
+            tag="${INPUT_TAG}"
+            release_id=$(jq -r '.id' <<< "${release}")
+            prerelease=$(jq -r '.prerelease' <<< "${release}")
+          elif [[ -n "${EVENT_RELEASE_ID}" ]]; then
+            tag="${EVENT_RELEASE_TAG}"
+            release_id="${EVENT_RELEASE_ID}"
+            prerelease="${EVENT_RELEASE_PRERELEASE}"
+          else
+            echo "::error::No release to publish; pass the tag input when not triggered by a release event"
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "release_id=${release_id}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${tag} (id ${release_id}, prerelease: ${prerelease})"
+
+      - name: List devices from release manifests
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          if ! names=$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}/assets" --paginate \
+            --jq '.[] | select(.name | endswith(".manifest.json")) | .name'); then
+            echo "::error::Failed to list release assets"
+            exit 1
+          fi
+          devices=$(sed 's/\.manifest\.json$//' <<< "${names}" \
+            | jq -R -s 'split("\n") | map(select(length > 0))')
+          if [[ "$(jq 'length' <<< "${devices}")" -eq 0 ]]; then
+            echo "::error::No <device>.manifest.json assets found on release"
+            exit 1
+          fi
+          echo "matrix=$(jq -c -n --argjson devices "${devices}" '{device: $devices}')" >> "$GITHUB_OUTPUT"
+          echo "Discovered devices: ${devices}"
+
+  prepare-artifact:
+    name: Prepare ${{ matrix.device }} artifact
+    needs: discover-devices
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover-devices.outputs.matrix) }}
+    steps:
+      - name: Download device assets and reconstruct layout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DEVICE: ${{ matrix.device }}
+          VERSION: ${{ needs.discover-devices.outputs.version }}
+          RELEASE_ID: ${{ needs.discover-devices.outputs.release-id }}
+        run: |
+          set -euo pipefail
+          # Recreate the <device>/<version>/{manifest.json,*.bin} layout that
+          # upload-to-r2 / promote-r2 expect from a build.yml run: the device
+          # name is embedded as the artifact's top-level directory so their
+          # merge-multiple downloads always yield files/<device>/<version>/.
+          target="output/${DEVICE}/${VERSION}"
+          mkdir -p "${target}"
+
+          # Download by asset id instead of `gh release download <tag>`: the
+          # singular releases/tags/{tag} endpoint gh uses to resolve the tag
+          # has proven unreliable, while asset listing/download by id works.
+          if ! assets=$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}/assets" --paginate \
+            --jq '.[] | "\(.id)\t\(.name)"'); then
+            echo "::error::Failed to list release assets"
+            exit 1
+          fi
+
+          download() {
+            local name="$1"
+            local asset_id
+            asset_id=$(awk -F'\t' -v name="${name}" '$2 == name {print $1; exit}' <<< "${assets}")
+            if [[ -z "${asset_id}" ]]; then
+              echo "::error::Asset ${name} not found on release"
+              return 1
+            fi
+            echo "Downloading ${name}"
+            gh api -H "Accept: application/octet-stream" \
+              "repos/${GH_REPO}/releases/assets/${asset_id}" > "${target}/${name}"
+          }
+
+          download "${DEVICE}.manifest.json"
+          mv "${target}/${DEVICE}.manifest.json" "${target}/manifest.json"
+
+          # Download only the binaries this device's manifest references
+          # (ota + parts) — avoids each matrix runner fetching every other
+          # device's bins.
+          if ! bins=$(jq -r '[
+            (.builds[]?.ota.path // empty),
+            (.builds[]?.parts[]?.path // empty)
+          ] | unique | .[]' "${target}/manifest.json"); then
+            echo "::error::Failed to parse ${DEVICE} manifest"
+            exit 1
+          fi
+          while IFS= read -r bin; do
+            [[ -z "${bin}" ]] && continue
+            download "${bin}"
+          done <<< "${bins}"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.device }}
+          path: output
+          if-no-files-found: error
+
+  upload-to-r2:
+    name: Upload to R2
+    needs:
+      - discover-devices
+      - prepare-artifact
+    uses: ./.github/workflows/upload-to-r2.yml
+    with:
+      directory: ${{ needs.discover-devices.outputs.directory }}
+    secrets: inherit
+
+  promote-beta:
+    name: Promote to Beta
+    needs:
+      - discover-devices
+      - upload-to-r2
+    uses: ./.github/workflows/promote-r2.yml
+    with:
+      version: ${{ needs.discover-devices.outputs.version }}
+      directory: ${{ needs.discover-devices.outputs.directory }}
+      channel: beta
+      manifest-filename: manifest-beta.json
+    secrets: inherit
+
+  promote-prod:
+    name: Promote to Production
+    if: needs.discover-devices.outputs.prerelease == 'false'
+    needs:
+      - discover-devices
+      - upload-to-r2
+    uses: ./.github/workflows/promote-r2.yml
+    with:
+      version: ${{ needs.discover-devices.outputs.version }}
+      directory: ${{ needs.discover-devices.outputs.directory }}
+      channel: production
+      manifest-filename: manifest.json
+    secrets: inherit
