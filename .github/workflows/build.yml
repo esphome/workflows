@@ -92,15 +92,30 @@ jobs:
           complete-manifest: true
           release-summary: ${{ inputs.release-summary }}
           release-url: ${{ inputs.release-url }}
+      - name: Determine artifact name
+        id: artifact
+        run: |
+          if [ -n "${{ inputs.combined-name }}" ]; then
+            name="${{ needs.prepare.outputs.artifact-prefix }}-${{ steps.esphome-build.outputs.name }}"
+          else
+            name="${{ steps.esphome-build.outputs.original-name }}"
+          fi
+          echo name=$name >> $GITHUB_OUTPUT
+      # The artifact name is embedded as the top-level directory of the
+      # artifact so that downloading with merge-multiple: true always yields
+      # <path>/<artifact-name>/<version>/. download-artifact v5+ no longer
+      # creates the per-artifact directory when a download matches only a
+      # single artifact (actions/download-artifact#419).
       - name: Move files for versioning
         run: |
-          mkdir -p output/${{ needs.prepare.outputs.version }}
-          mv ${{ steps.esphome-build.outputs.name }}/* output/${{ needs.prepare.outputs.version }}/
+          name="${{ steps.artifact.outputs.name }}"
+          version="${{ needs.prepare.outputs.version }}"
+          mkdir -p "output/$name/$version"
+          mv ${{ steps.esphome-build.outputs.name }}/* "output/$name/$version/"
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          # yamllint disable-line rule:line-length
-          name: ${{ inputs.combined-name != '' && format('{0}-{1}', needs.prepare.outputs.artifact-prefix, steps.esphome-build.outputs.name) || steps.esphome-build.outputs.original-name }}
+          name: ${{ steps.artifact.outputs.name }}
           path: output
 
   combine:
@@ -112,10 +127,14 @@ jobs:
     if: inputs.combined-name != ''
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: files
           pattern: ${{ needs.prepare.outputs.artifact-prefix }}-*
+          # Each artifact embeds its name as its top-level directory, so
+          # merging yields files/<artifact-name>/<version>/ regardless of
+          # how many artifacts match the pattern.
+          merge-multiple: true
 
       - name: Get artifact names
         id: artifacts
@@ -133,21 +152,22 @@ jobs:
       - name: Combine all parts into a single manifest
         run: |
           version="${{ needs.prepare.outputs.version }}"
-          mkdir -p "output/$version"
+          combined="${{ inputs.combined-name }}"
+          mkdir -p "output/$combined/$version"
           pushd files
           for device in *; do
             pushd $device
             pushd $version
-            cp * "../../../output/$version/"
+            cp * "../../../output/$combined/$version/"
             popd
             popd
           done
           popd
           jq -s '(.[0] | del(.builds)) + {"builds": (reduce .[].builds as $b ([]; . + $b))}' \
-            files/*/$version/manifest.json > output/$version/manifest.json
+            files/*/$version/manifest.json > "output/$combined/$version/manifest.json"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.combined-name }}
           path: output

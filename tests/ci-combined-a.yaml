@@ -1,0 +1,23 @@
+esphome:
+  name: ci-combined-a
+  friendly_name: CI Combined A
+  project:
+    name: esphome.workflows-ci
+    version: dev
+
+esp8266:
+  board: esp01_1m
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+improv_serial:
+
+wifi:
+  ap: {}
+
+captive_portal:
