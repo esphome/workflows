@@ -15,10 +15,13 @@ on:
       - main
   workflow_dispatch:
 
-# The draft-release jobs inside the called workflow are skipped on these
-# events, so nothing here needs more than read access.
+# The called workflow's draft-release jobs are skipped on these events, but
+# GitHub validates every nested job's requested permissions against this
+# grant at call time — even jobs that end up skipped — so contents: write
+# must be granted for the call to be valid at all. This matches what real
+# consumers grant.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
