@@ -4,6 +4,21 @@ name: Build to Draft Release
 # it on pull_request / workflow_dispatch (build only) and on workflow_run of
 # their Release Drafter workflow (build and upload to the draft); the event
 # gating lives in here, so callers stay a single `uses:` job.
+#
+# The draft's existing assets are not cleaned here: draft-calver-release.yml
+# empties them when it re-adds the ASSETS_PENDING warning, before this
+# workflow is triggered. This workflow only ever adds assets.
+#
+# Repositories that publish several combined manifests from one release (e.g.
+# esphome/firmware's esp-web-tools and esphome-web) express that with the
+# `groups` input and still call this workflow once. Grouping lives inside a
+# single call because removing the pending warning is a claim that the whole
+# release is built, and only one job can make it: split across a call per
+# group, whichever call finished first would strip the warning while the
+# others were still compiling, inviting a maintainer to publish a release
+# missing a group. One call also keeps one upload job — upload-to-gh-release
+# takes every artifact in the run, so two calls in one workflow would upload
+# each other's artifacts and race on identical asset names.
 
 on:
   workflow_call:
@@ -15,14 +30,39 @@ on:
       files:
         description: >-
           Newline separated list of files to build. Leave empty to build
-          every *.factory.yaml in the calling repository.
+          every *.factory.yaml in the calling repository. Mutually exclusive
+          with `groups`.
+        required: false
+        type: string
+        default: ""
+      combined-name:
+        description: >-
+          Combine every built file into a single manifest published under
+          this name. Leave empty to publish one manifest per file. Mutually
+          exclusive with `groups`; use `groups` to publish more than one
+          combined manifest from the same release.
+        required: false
+        type: string
+        default: ""
+      groups:
+        description: >-
+          JSON array of {"name": ..., "files": ...} objects, to publish
+          several combined manifests from one release. Each group builds its
+          own `files` (newline separated) into a single manifest named
+          `name`, and every group's assets are uploaded to the same draft.
+          Names must be unique; one group may use an empty name to publish
+          its files as one manifest each instead of combining them.
+          Per-group `files` is required and is not auto-discovered: discovery
+          globs *.factory.yaml across the whole repository, so one group would
+          sweep up another group's configs. Mutually exclusive with `files`
+          and `combined-name`.
         required: false
         type: string
         default: ""
 
 jobs:
   discover-files:
-    name: Discover Factory Configs
+    name: Resolve Build Groups
     # Skip the entire pipeline if the Release Drafter run that triggered us failed.
     if: >-
       github.event_name != 'workflow_run' ||
@@ -31,36 +71,79 @@ jobs:
     permissions:
       contents: read
     outputs:
-      files: ${{ steps.find.outputs.files }}
+      groups: ${{ steps.find.outputs.groups }}
     steps:
       - name: Checkout code
-        if: inputs.files == ''
+        # Only the auto-discovery path reads the repository; every other form
+        # states its files up front.
+        if: inputs.files == '' && inputs.groups == ''
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Find factory configs
+      - name: Resolve build groups
         id: find
         env:
           INPUT_FILES: ${{ inputs.files }}
+          INPUT_COMBINED_NAME: ${{ inputs.combined-name }}
+          INPUT_GROUPS: ${{ inputs.groups }}
         run: |
           set -euo pipefail
-          files="${INPUT_FILES}"
-          if [[ -z "${files}" ]]; then
-            # By convention every device ships a <device>/<device>.factory.yaml;
-            # anything matching *.factory.yaml outside hidden directories is
-            # built. Prune dot-directories (.git, .github) rather than just
-            # filtering them from the results, so find never descends into them.
-            files=$(find . -path '*/.*' -prune -o -name '*.factory.yaml' -print | sed 's|^\./||' | sort)
+          # Both input forms normalise to one JSON array of {name, files}, so
+          # the build matrix below has a single shape to consume. The
+          # single-group form carries name "" — build.yml reads that as "do
+          # not combine" and publishes one manifest per file, which is the
+          # behaviour callers that pass neither input have always had.
+          if [[ -n "${INPUT_GROUPS}" ]]; then
+            if [[ -n "${INPUT_FILES}" || -n "${INPUT_COMBINED_NAME}" ]]; then
+              echo "::error::groups cannot be combined with files or combined-name"
+              exit 1
+            fi
+            if ! groups=$(jq -ce . <<< "${INPUT_GROUPS}"); then
+              echo "::error::groups is not valid JSON"
+              exit 1
+            fi
+            # An empty name is allowed and means "publish these per file"
+            # rather than combining them, for repositories that ship a
+            # combined group alongside standalone devices. The uniqueness
+            # check keeps that to at most one group.
+            # jq's or short-circuits, so .name is never indexed on a non-object.
+            if ! problem=$(jq -r '
+              if type != "array" then "groups must be a JSON array"
+              elif length == 0 then "groups must not be empty"
+              elif any(.[];
+                (type != "object")
+                or ((.name | type) != "string")
+                or ((.files | type) != "string") or (.files == "")
+              ) then "every group needs a string name and a non-empty files string"
+              elif ([.[].name] | length) != ([.[].name] | unique | length)
+              then "group names must be unique"
+              else empty
+              end' <<< "${groups}"); then
+              echo "::error::Failed to validate groups"
+              exit 1
+            fi
+            if [[ -n "${problem}" ]]; then
+              echo "::error::${problem}"
+              exit 1
+            fi
+          else
+            files="${INPUT_FILES}"
+            if [[ -z "${files}" ]]; then
+              # By convention every device ships a <device>/<device>.factory.yaml;
+              # anything matching *.factory.yaml outside hidden directories is
+              # built. Prune dot-directories (.git, .github) rather than just
+              # filtering them from the results, so find never descends into them.
+              files=$(find . -path '*/.*' -prune -o -name '*.factory.yaml' -print | sed 's|^\./||' | sort)
+            fi
+            if [[ -z "${files}" ]]; then
+              echo "::error::No *.factory.yaml files found"
+              exit 1
+            fi
+            groups=$(jq -cn --arg name "${INPUT_COMBINED_NAME}" --arg files "${files}" \
+              '[{name: $name, files: $files}]')
           fi
-          if [[ -z "${files}" ]]; then
-            echo "::error::No *.factory.yaml files found"
-            exit 1
-          fi
-          echo "Files to build:"
-          echo "${files}"
-          {
-            echo "files<<FACTORY_FILES_EOF"
-            echo "${files}"
-            echo "FACTORY_FILES_EOF"
-          } >> "$GITHUB_OUTPUT"
+          echo "Groups to build:"
+          jq -r '.[] | "  \(if .name == "" then "(one manifest per file)" else .name end):",
+                       (.files | split("\n") | .[] | "    \(.)")' <<< "${groups}"
+          echo "groups=${groups}" >> "$GITHUB_OUTPUT"
 
   determine-version:
     name: Determine Version
@@ -74,7 +157,7 @@ jobs:
     # visible to tokens with push access), which the caller must grant on
     # every event anyway: GitHub validates each nested job's requested
     # permissions against the caller's grant when the workflow is called,
-    # even for jobs that end up skipped (see clean-draft-assets below).
+    # even for jobs that end up skipped (see upload-to-draft-release below).
     outputs:
       version: ${{ steps.info.outputs.version }}
       summary: ${{ steps.info.outputs.summary }}
@@ -128,65 +211,40 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   build-firmware:
-    name: Build Firmware
+    # One leg per group; the legacy single-group form resolves to exactly one
+    # leg named "Build Firmware", as before.
+    name: Build ${{ matrix.group.name || 'Firmware' }}
     needs:
       - discover-files
       - determine-version
+    strategy:
+      # Let every group report its own failure instead of cancelling its
+      # siblings. upload-to-draft-release needs this whole job, so a failed
+      # leg still means nothing is uploaded and the draft keeps its pending
+      # warning.
+      fail-fast: false
+      matrix:
+        group: ${{ fromJson(needs.discover-files.outputs.groups) }}
     uses: ./.github/workflows/build.yml
     with:
-      files: ${{ needs.discover-files.outputs.files }}
+      files: ${{ matrix.group.files }}
+      combined-name: ${{ matrix.group.name }}
       esphome-version: ${{ inputs.esphome-version }}
       release-summary: ${{ needs.determine-version.outputs.summary }}
       release-url: ${{ needs.determine-version.outputs.url }}
       release-version: ${{ needs.determine-version.outputs.version }}
 
-  clean-draft-assets:
-    name: Clean Draft Release Assets
-    # Delete any pre-existing assets so renamed files (e.g. when the version
-    # bumps from .1 to .2) don't linger alongside the new ones. Gated on
-    # build success so a failed build doesn't leave the draft release empty.
-    if: github.event_name == 'workflow_run'
-    needs:
-      - build-firmware
-      - determine-version
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Delete existing assets from draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.determine-version.outputs.version }}
-        run: |
-          set -euo pipefail
-          if ! releases=$(gh api "repos/${GH_REPO}/releases?per_page=100"); then
-            echo "::error::Failed to list releases"
-            exit 1
-          fi
-          release=$(jq --arg tag "${TAG}" \
-            '[.[] | select(.tag_name == $tag and .draft == true)] | first' <<< "${releases}")
-          if [[ -z "${release}" || "${release}" == "null" ]]; then
-            echo "Draft release ${TAG} not found; nothing to clean"
-            exit 0
-          fi
-          release_id=$(jq -r '.id' <<< "${release}")
-          if ! asset_ids=$(gh api "repos/${GH_REPO}/releases/${release_id}/assets" --paginate --jq '.[].id'); then
-            echo "::error::Failed to list draft release assets"
-            exit 1
-          fi
-          for id in ${asset_ids}; do
-            echo "Deleting asset ${id}"
-            gh api "repos/${GH_REPO}/releases/assets/${id}" --method DELETE --silent
-          done
-
   upload-to-draft-release:
     name: Upload to Draft Release
+    # Uploads every group in one job: upload-to-gh-release.yml downloads all
+    # of the run's artifacts, and each group's build published its manifest as
+    # an artifact of this same run. It replaces any same-named asset, so this
+    # stays correct when a build is re-run without the drafter having emptied
+    # the draft again.
     if: github.event_name == 'workflow_run'
     needs:
       - build-firmware
       - determine-version
-      - clean-draft-assets
     permissions:
       contents: write
     uses: ./.github/workflows/upload-to-gh-release.yml
