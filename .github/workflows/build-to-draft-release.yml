@@ -107,7 +107,10 @@ jobs:
               exit 1
             fi
             tag=$(jq -r '.tag_name' <<< "${release_json}")
-            url=$(jq -r '.html_url' <<< "${release_json}")
+            # Do NOT use the draft's html_url: for a draft it always points
+            # at an untagged-* placeholder that 404s once the release is
+            # published. The final URL is deterministic from the tag.
+            url="https://github.com/${GH_REPO}/releases/tag/${tag}"
             # Strip the ASSETS_PENDING caution block from the draft body before
             # baking it into the firmware as release-summary; the warning is
             # only meant for the maintainer viewing the draft on GitHub.
