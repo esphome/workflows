@@ -63,6 +63,12 @@ jobs:
           VERSION: ${{ inputs.version }}
           DRAFT: ${{ inputs.draft }}
         run: |-
+          shopt -s nullglob
+          files=(output/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No files found in output/ to upload."
+            exit 1
+          fi
           # gh release view/upload cannot resolve draft releases by tag (the tag
           # does not exist until publish), so resolve the release id via the API,
           # which lists drafts too.
@@ -75,19 +81,20 @@ jobs:
             if [ "$DRAFT" = "true" ]; then
               draft_flag=(--draft)
             fi
-            gh release create "$VERSION" output/* --title "$VERSION" "${draft_flag[@]}"
+            gh release create "$VERSION" "${files[@]}" --title "$VERSION" "${draft_flag[@]}"
           else
             if ! assets=$(gh api "repos/$GH_REPO/releases/$release_id/assets" --paginate --jq '.[] | "\(.id)\t\(.name)"'); then
               echo "::error::Failed to list assets for release $release_id."
               exit 1
             fi
-            for file in output/*; do
+            for file in "${files[@]}"; do
               name=$(basename "$file")
-              asset_id=$(awk -F'\t' -v name="$name" '$2 == name {print $1}' <<< "$assets")
+              asset_id=$(awk -F'\t' -v name="$name" '$2 == name {print $1; exit}' <<< "$assets")
               if [ -n "$asset_id" ]; then
                 gh api --method DELETE "repos/$GH_REPO/releases/assets/$asset_id"
               fi
               gh api --method POST \
+                --header "Content-Type: application/octet-stream" \
                 "https://uploads.github.com/repos/$GH_REPO/releases/$release_id/assets?name=$name" \
                 --input "$file" > /dev/null
             done
