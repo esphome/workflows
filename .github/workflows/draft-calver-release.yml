@@ -104,6 +104,18 @@ jobs:
             echo "::error::release-drafter did not report a release id"
             exit 1
           fi
+          # release-drafter maintains a draft, but refuse to touch the release
+          # unless it actually is one: deleting a published release's assets
+          # would be irreversible, so a misconfigured caller must fail loudly
+          # here rather than lose published firmware.
+          if ! release=$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}"); then
+            echo "::error::Failed to fetch release ${RELEASE_ID}"
+            exit 1
+          fi
+          if [[ "$(jq -r '.draft' <<< "${release}")" != "true" ]]; then
+            echo "::error::Release ${RELEASE_ID} is not a draft; refusing to delete its assets"
+            exit 1
+          fi
           if ! asset_ids=$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}/assets" \
               --paginate --jq '.[].id'); then
             echo "::error::Failed to list assets for release ${RELEASE_ID}"

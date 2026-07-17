@@ -112,7 +112,7 @@ jobs:
                 (type != "object")
                 or ((.name | type) != "string")
                 or ((.files | type) != "string") or (.files == "")
-              ) then "every group needs a string name and a non-empty files"
+              ) then "every group needs a string name and a non-empty files string"
               elif ([.[].name] | length) != ([.[].name] | unique | length)
               then "group names must be unique"
               else empty
