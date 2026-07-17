@@ -1,0 +1,73 @@
+name: Draft CalVer Release
+# Computes the next CalVer version (YY.M.N) and creates or updates a draft
+# release for it with release-drafter. The release-drafter action reads
+# .github/release-drafter.yml from the calling repository at runtime, so each
+# consumer keeps its own release-notes configuration.
+
+on:
+  workflow_call:
+
+jobs:
+  release-drafter:
+    name: Update draft release
+    runs-on: ubuntu-latest
+    permissions:
+      # contents: write to create/update the draft release (drafts are also
+      # only listed for tokens with push access); pull-requests: read for
+      # release-drafter to build the release notes.
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Calculate calver version
+        id: calver
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # CalVer scheme: YY.M.N
+          #   YY = year mod 100 (e.g. 2026 -> 26)
+          #   M  = month, no zero padding (e.g. April -> 4)
+          #   N  = sequential release of that month, starting at 1
+          year=$(date -u +%y)
+          month=$(date -u +%-m)
+          prefix="${year}.${month}."
+
+          # The newest 100 releases always include everything tagged in the
+          # current month, so one page is enough to find the highest sequence.
+          if ! releases=$(gh api "repos/${GH_REPO}/releases?per_page=100"); then
+            echo "::error::Failed to list releases"
+            exit 1
+          fi
+
+          # Highest existing tag (draft or published) matching the current YY.M.*
+          latest_seq=$(jq -r --arg prefix "${prefix}" \
+            '[.[] | select(.tag_name | startswith($prefix))
+              | .tag_name | ltrimstr($prefix) | tonumber?] | max // 0' \
+            <<< "${releases}")
+
+          if [[ "${latest_seq}" -eq 0 ]]; then
+            seq=1
+          else
+            # If the existing release at the highest seq is still a draft, reuse it
+            # so subsequent pushes update the same draft. Otherwise start a new one.
+            is_draft=$(jq -r --arg tag "${prefix}${latest_seq}" \
+              '[.[] | select(.tag_name == $tag)] | first | .draft' <<< "${releases}")
+            if [[ "${is_draft}" == "true" ]]; then
+              seq=${latest_seq}
+            else
+              seq=$((latest_seq + 1))
+            fi
+          fi
+
+          version="${prefix}${seq}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Calculated calver version: ${version}"
+
+      - uses: release-drafter/release-drafter@4d75298e00d9e34c483e5ff8c68d0ea1c1940c1e # v7.5.1
+        with:
+          version: ${{ steps.calver.outputs.version }}
+          tag: ${{ steps.calver.outputs.version }}
+          name: ${{ steps.calver.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
