@@ -21,9 +21,15 @@ jobs:
       contents: write
     steps:
       - name: Download Artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: files
+          # Each artifact built by build.yml embeds its name as its top-level
+          # directory, so merging yields files/<artifact-name>/<version>/
+          # regardless of how many artifacts the run has. Without merging,
+          # download-artifact v5+ drops the per-artifact directory when the
+          # run has only a single artifact (actions/download-artifact#419).
+          merge-multiple: true
 
       - name: Tree
         run: |-
@@ -37,21 +43,14 @@ jobs:
           pushd files
           for device in *; do
             pushd $device
-            if [ "$device" != "$version" ]; then
-              pushd $version
-              output_path="../../../output/"
-            else
-              output_path="../../output/"
-            fi
-            cp manifest.json "${output_path}$device.manifest.json"
+            pushd $version
+            cp manifest.json "../../../output/$device.manifest.json"
             for bin in *.{bin,elf}; do
-              md5sum $bin | head -c 32 > "${output_path}$bin.md5"
-              sha256sum $bin | head -c 64 > "${output_path}$bin.sha256"
-              cp $bin "$output_path"
+              md5sum $bin | head -c 32 > "../../../output/$bin.md5"
+              sha256sum $bin | head -c 64 > "../../../output/$bin.sha256"
+              cp $bin ../../../output/
             done
-            if [ "$device" != "$version" ]; then
-              popd
-            fi
+            popd
             popd
           done
           popd
