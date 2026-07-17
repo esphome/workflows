@@ -81,7 +81,10 @@ jobs:
           fi
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "release_id=$(jq -r '.id' <<< "${release}")" >> "$GITHUB_OUTPUT"
-          echo "url=$(jq -r '.html_url' <<< "${release}")" >> "$GITHUB_OUTPUT"
+          # Do NOT use the draft's html_url: for a draft it always points at
+          # an untagged-* placeholder that 404s once the release is
+          # published. The final URL is deterministic from the tag.
+          echo "url=https://github.com/${GH_REPO}/releases/tag/${tag}" >> "$GITHUB_OUTPUT"
           {
             echo "body<<RELEASE_BODY_EOF"
             jq -r '.body' <<< "${release}"
