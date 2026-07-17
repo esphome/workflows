@@ -71,7 +71,8 @@ jobs:
           # gh release view/upload cannot resolve draft releases by tag (the tag
           # does not exist until publish), so resolve the release id via the API,
           # which lists drafts too.
-          if ! release_id=$(gh api "repos/$GH_REPO/releases" --paginate --jq '[.[] | select(.tag_name == $ENV.VERSION)] | first | .id // empty'); then
+          if ! release_id=$(gh api "repos/$GH_REPO/releases" --paginate \
+              --jq '[.[] | select(.tag_name == $ENV.VERSION)] | first | .id // empty'); then
             echo "::error::Failed to list releases for $GH_REPO."
             exit 1
           fi
@@ -82,7 +83,8 @@ jobs:
             fi
             gh release create "$VERSION" "${files[@]}" --title "$VERSION" "${draft_flag[@]}"
           else
-            if ! assets=$(gh api "repos/$GH_REPO/releases/$release_id/assets" --paginate --jq '.[] | "\(.id)\t\(.name)"'); then
+            if ! assets=$(gh api "repos/$GH_REPO/releases/$release_id/assets" \
+                --paginate --jq '.[] | "\(.id)\t\(.name)"'); then
               echo "::error::Failed to list assets for release $release_id."
               exit 1
             fi

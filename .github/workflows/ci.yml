@@ -7,6 +7,10 @@ on:
       - main
   workflow_dispatch:
 
+# Default for all jobs; the release jobs override this with contents: write.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
