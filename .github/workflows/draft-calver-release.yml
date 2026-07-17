@@ -1,8 +1,14 @@
 name: Draft CalVer Release
 # Computes the next CalVer version (YY.M.N) and creates or updates a draft
-# release for it with release-drafter. The release-drafter action reads
-# .github/release-drafter.yml from the calling repository at runtime, so each
-# consumer keeps its own release-notes configuration.
+# release for it with release-drafter, then empties the draft's assets. The
+# release-drafter action reads .github/release-drafter.yml from the calling
+# repository at runtime, so each consumer keeps its own release-notes
+# configuration.
+#
+# Emptying the assets here makes this workflow the single writer that resets
+# a release cycle: the build workflows that run afterwards (on workflow_run
+# of the caller's Release Drafter workflow) can assume a clean draft and just
+# add their own assets, however many of them there are.
 
 on:
   workflow_call:
@@ -65,9 +71,50 @@ jobs:
           echo "Calculated calver version: ${version}"
 
       - uses: release-drafter/release-drafter@4d75298e00d9e34c483e5ff8c68d0ea1c1940c1e # v7.5.1
+        id: drafter
         with:
           version: ${{ steps.calver.outputs.version }}
           tag: ${{ steps.calver.outputs.version }}
           name: ${{ steps.calver.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+      # release-drafter has just rewritten the body from the caller's
+      # template, which re-adds its ASSETS_PENDING warning: the draft now
+      # declares that it has no build assets, so make that true.
+      #
+      # This is the only point where deleting every asset is unambiguous.
+      # Anything still attached belongs to an earlier build of this draft, and
+      # no build is in flight yet — the build workflows only start once this
+      # workflow has completed. A clean that runs alongside the builds cannot
+      # tell a stale asset from one another build just uploaded, which is what
+      # would otherwise force every repository into a single build+upload call
+      # per release.
+      #
+      # Uses the id release-drafter just reported rather than searching for
+      # "the first draft", so it can never empty the wrong release.
+      - name: Delete stale assets from the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ steps.drafter.outputs.id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RELEASE_ID}" ]]; then
+            echo "::error::release-drafter did not report a release id"
+            exit 1
+          fi
+          if ! asset_ids=$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}/assets" \
+              --paginate --jq '.[].id'); then
+            echo "::error::Failed to list assets for release ${RELEASE_ID}"
+            exit 1
+          fi
+          # A bare `while read <<< ""` would loop once on an empty id.
+          if [[ -z "${asset_ids}" ]]; then
+            echo "Draft release ${RELEASE_ID} has no assets to delete"
+            exit 0
+          fi
+          while read -r id; do
+            echo "Deleting asset ${id}"
+            gh api "repos/${GH_REPO}/releases/assets/${id}" --method DELETE --silent
+          done <<< "${asset_ids}"
