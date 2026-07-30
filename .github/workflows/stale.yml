@@ -1,0 +1,242 @@
+---
+name: Stale issues and PRs
+
+on:
+  workflow_call:
+    inputs:
+      days-before-stale:
+        description: Days without real activity before an item is marked stale
+        required: false
+        type: number
+        default: 90
+      days-before-close:
+        description: Days after the stale label before an item is closed
+        required: false
+        type: number
+        default: 7
+      stale-label:
+        description: Label used to mark stale items
+        required: false
+        type: string
+        default: stale
+      exempt-label:
+        description: Items with this label are never marked or closed
+        required: false
+        type: string
+        default: not-stale
+      stale-pr-message:
+        description: Comment posted when a PR is marked stale
+        required: false
+        type: string
+        default: >
+          There hasn't been any activity on this pull request recently. This
+          pull request has been automatically marked as stale because of that
+          and will be closed if no further activity occurs within 7 days.
+
+          If you are the author of this PR, please leave a comment if you want
+          to keep it open. Also, please rebase your PR onto the latest dev
+          branch to ensure that it's up to date with the latest changes.
+
+          Thank you for your contribution!
+      stale-issue-message:
+        description: Comment posted when an issue is marked stale
+        required: false
+        type: string
+        default: >
+          There hasn't been any activity on this issue recently. Due to the
+          high number of incoming GitHub notifications, we have to clean some
+          of the old issues, as many of them have already been resolved with
+          the latest updates.
+
+          Please make sure to update to the latest version and check if that
+          solves the issue. Let us know if that works for you by adding a
+          comment 👍
+
+          This issue has now been marked as stale and will be closed if no
+          further activity occurs. Thank you for your contributions.
+      dry-run:
+        description: Log what would happen without labeling, commenting or closing
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: stale
+  cancel-in-progress: false
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Process stale issues and PRs
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const DAYS_BEFORE_STALE = ${{ inputs.days-before-stale }};
+            const DAYS_BEFORE_CLOSE = ${{ inputs.days-before-close }};
+            const STALE_LABEL = "${{ inputs.stale-label }}";
+            const EXEMPT_LABEL = "${{ inputs.exempt-label }}";
+            const STALE_PR_MESSAGE = process.env.STALE_PR_MESSAGE;
+            const STALE_ISSUE_MESSAGE = process.env.STALE_ISSUE_MESSAGE;
+            const DRY_RUN = ${{ inputs.dry-run }};
+
+            const now = new Date();
+            const staleCutoff = new Date(now.getTime() - DAYS_BEFORE_STALE * 24 * 60 * 60 * 1000);
+            const closeCutoff = new Date(now.getTime() - DAYS_BEFORE_CLOSE * 24 * 60 * 60 * 1000);
+
+            console.log(`Will mark items without real activity since: ${staleCutoff.toISOString()}`);
+            console.log(`Will close items marked stale before: ${closeCutoff.toISOString()}`);
+
+            // The GitHub updated_at timestamp moves on events that are not
+            // real activity: bots editing their comments in place, label
+            // changes and similar housekeeping. Real activity is therefore
+            // measured directly: comments *created* by users, and for PRs
+            // also commits and review submissions. Since every kind of real
+            // activity also bumps updated_at, the timestamp is an upper
+            // bound: an item whose updated_at is old is conclusively
+            // inactive, and only apparently-fresh items need verification.
+            async function hasRealActivitySince(item, since) {
+              // Note: the `since` filter of listComments matches the comment
+              // updated_at, so an edited old comment reappears here; compare
+              // created_at to only count genuinely new comments.
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: item.number,
+                since: since.toISOString(),
+                per_page: 100,
+              });
+              if (comments.some(c => c.user?.type === 'User' && new Date(c.created_at) > since)) {
+                return true;
+              }
+
+              if ('pull_request' in item) {
+                const commits = await github.paginate(github.rest.pulls.listCommits, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: item.number,
+                  per_page: 100,
+                });
+                const last = commits[commits.length - 1];
+                const lastCommitDate = last?.commit?.committer?.date ?? last?.commit?.author?.date;
+                if (lastCommitDate && new Date(lastCommitDate) > since) {
+                  return true;
+                }
+
+                const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: item.number,
+                  per_page: 100,
+                });
+                if (reviews.some(r => r.user?.type === 'User' && r.submitted_at && new Date(r.submitted_at) > since)) {
+                  return true;
+                }
+              }
+
+              return false;
+            }
+
+            async function staleLabelDate(item) {
+              const events = await github.paginate(github.rest.issues.listEvents, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: item.number,
+                per_page: 100,
+              });
+              const labelings = events.filter(e => e.event === 'labeled' && e.label?.name === STALE_LABEL);
+              const last = labelings[labelings.length - 1];
+              return last ? new Date(last.created_at) : null;
+            }
+
+            const openItems = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            console.log(`Processing ${openItems.length} open items`);
+
+            let marked = 0, unmarked = 0, closed = 0;
+
+            for (const item of openItems) {
+              if (item.locked) continue;
+              const labels = item.labels.map(l => l.name);
+              if (labels.includes(EXEMPT_LABEL)) continue;
+
+              const isPr = 'pull_request' in item;
+              const updatedAt = new Date(item.updated_at);
+              const createdAt = new Date(item.created_at);
+
+              try {
+                if (labels.includes(STALE_LABEL)) {
+                  // Already stale: real activity unmarks, silence closes
+                  const labeledAt = await staleLabelDate(item);
+                  if (!labeledAt) continue;
+
+                  if (await hasRealActivitySince(item, labeledAt)) {
+                    console.log(`Unmarking ${isPr ? 'PR' : 'issue'} #${item.number}: real activity since it was marked stale`);
+                    unmarked++;
+                    if (!DRY_RUN) {
+                      await github.rest.issues.removeLabel({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: item.number,
+                        name: STALE_LABEL,
+                      });
+                    }
+                  } else if (labeledAt < closeCutoff) {
+                    console.log(`Closing ${isPr ? 'PR' : 'issue'} #${item.number}: no real activity since it was marked stale on ${labeledAt.toISOString()}`);
+                    closed++;
+                    if (!DRY_RUN) {
+                      const update = {
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: item.number,
+                        state: 'closed',
+                      };
+                      // Issues support a close reason; PRs do not
+                      if (!isPr) {
+                        update.state_reason = 'not_planned';
+                      }
+                      await github.rest.issues.update(update);
+                    }
+                  }
+                  continue;
+                }
+
+                // Not stale yet. An old updated_at is conclusive; a fresh one
+                // may be a phantom update and needs verification, but only
+                // for items old enough to possibly be inactive.
+                if (updatedAt >= staleCutoff && createdAt >= staleCutoff) continue;
+                if (updatedAt >= staleCutoff && await hasRealActivitySince(item, staleCutoff)) continue;
+
+                console.log(`Marking ${isPr ? 'PR' : 'issue'} #${item.number} as stale: no real activity since ${staleCutoff.toISOString()} (updated_at ${item.updated_at})`);
+                marked++;
+                if (!DRY_RUN) {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: item.number,
+                    labels: [STALE_LABEL],
+                  });
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: item.number,
+                    body: isPr ? STALE_PR_MESSAGE : STALE_ISSUE_MESSAGE,
+                  });
+                }
+              } catch (e) {
+                console.error(`Failed to process #${item.number}: ${e.message}`);
+              }
+            }
+
+            console.log(`Done${DRY_RUN ? ' (dry run)' : ''}: ${marked} marked, ${unmarked} unmarked, ${closed} closed`);
+        env:
+          STALE_PR_MESSAGE: ${{ inputs.stale-pr-message }}
+          STALE_ISSUE_MESSAGE: ${{ inputs.stale-issue-message }}
