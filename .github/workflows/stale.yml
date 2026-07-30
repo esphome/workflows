@@ -200,12 +200,14 @@ jobs:
                 if (labels.includes(STALE_LABEL)) {
                   // Already stale: real activity unmarks, silence closes
                   const labeledAt = await staleLabelDate(item);
-                  if (!labeledAt) continue;
+                  if (!labeledAt) {
+                    console.warn(`No ${STALE_LABEL} labeling event found for #${item.number}; skipping`);
+                    continue;
+                  }
 
                   if (await hasRealActivitySince(item, labeledAt)) {
                     const kind = isPr ? 'PR' : 'issue';
                     console.log(`Unmarking ${kind} #${item.number}: real activity since it was marked stale`);
-                    unmarked++;
                     if (!DRY_RUN) {
                       await github.rest.issues.removeLabel({
                         owner: context.repo.owner,
@@ -214,11 +216,11 @@ jobs:
                         name: STALE_LABEL,
                       });
                     }
+                    unmarked++;
                   } else if (labeledAt < closeCutoff) {
                     const kind = isPr ? 'PR' : 'issue';
                     console.log(`Closing ${kind} #${item.number}: ` +
                       `no real activity since stale on ${labeledAt.toISOString()}`);
-                    closed++;
                     if (!DRY_RUN) {
                       const update = {
                         owner: context.repo.owner,
@@ -232,6 +234,7 @@ jobs:
                       }
                       await github.rest.issues.update(update);
                     }
+                    closed++;
                   }
                   continue;
                 }
@@ -245,21 +248,24 @@ jobs:
                 const kind = isPr ? 'PR' : 'issue';
                 console.log(`Marking ${kind} #${item.number} as stale: ` +
                   `no real activity since ${staleCutoff.toISOString()} (updated_at ${item.updated_at})`);
-                marked++;
                 if (!DRY_RUN) {
-                  await github.rest.issues.addLabels({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: item.number,
-                    labels: [STALE_LABEL],
-                  });
+                  // Comment before labeling: if the comment fails the item is
+                  // retried next run, instead of a labeled-but-unwarned item
+                  // being closed later without explanation
                   await github.rest.issues.createComment({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     issue_number: item.number,
                     body: isPr ? STALE_PR_MESSAGE : STALE_ISSUE_MESSAGE,
                   });
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: item.number,
+                    labels: [STALE_LABEL],
+                  });
                 }
+                marked++;
               } catch (e) {
                 console.error(`Failed to process #${item.number}: ${e instanceof Error ? e.message : e}`);
               }
