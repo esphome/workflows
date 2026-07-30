@@ -70,6 +70,7 @@ on:
         default: false
 
 permissions:
+  contents: read        # repos.getCommit for the PR head commit date
   issues: write
   pull-requests: write
 
