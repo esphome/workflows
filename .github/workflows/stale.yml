@@ -31,11 +31,12 @@ on:
         default: >
           There hasn't been any activity on this pull request recently. This
           pull request has been automatically marked as stale because of that
-          and will be closed if no further activity occurs within 7 days.
+          and will be closed if no further activity occurs.
 
           If you are the author of this PR, please leave a comment if you want
-          to keep it open. Also, please rebase your PR onto the latest dev
-          branch to ensure that it's up to date with the latest changes.
+          to keep it open. Also, please rebase your PR onto the latest
+          development branch to ensure that it's up to date with the latest
+          changes.
 
           Thank you for your contribution!
       stale-issue-message:
@@ -115,14 +116,17 @@ jobs:
               }
 
               if ('pull_request' in item) {
-                const commits = await github.paginate(github.rest.pulls.listCommits, {
+                const {data: pull} = await github.rest.pulls.get({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   pull_number: item.number,
-                  per_page: 100,
                 });
-                const last = commits[commits.length - 1];
-                const lastCommitDate = last?.commit?.committer?.date ?? last?.commit?.author?.date;
+                const {data: head} = await github.rest.repos.getCommit({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: pull.head.sha,
+                });
+                const lastCommitDate = head.commit?.committer?.date ?? head.commit?.author?.date;
                 if (lastCommitDate && new Date(lastCommitDate) > since) {
                   return true;
                 }
