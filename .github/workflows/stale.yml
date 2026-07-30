@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Process stale issues and PRs
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           script: |
             const DAYS_BEFORE_STALE = ${{ inputs.days-before-stale }};
@@ -179,7 +179,8 @@ jobs:
                   if (!labeledAt) continue;
 
                   if (await hasRealActivitySince(item, labeledAt)) {
-                    console.log(`Unmarking ${isPr ? 'PR' : 'issue'} #${item.number}: real activity since it was marked stale`);
+                    const kind = isPr ? 'PR' : 'issue';
+                    console.log(`Unmarking ${kind} #${item.number}: real activity since it was marked stale`);
                     unmarked++;
                     if (!DRY_RUN) {
                       await github.rest.issues.removeLabel({
@@ -190,7 +191,9 @@ jobs:
                       });
                     }
                   } else if (labeledAt < closeCutoff) {
-                    console.log(`Closing ${isPr ? 'PR' : 'issue'} #${item.number}: no real activity since it was marked stale on ${labeledAt.toISOString()}`);
+                    const kind = isPr ? 'PR' : 'issue';
+                    console.log(`Closing ${kind} #${item.number}: ` +
+                      `no real activity since stale on ${labeledAt.toISOString()}`);
                     closed++;
                     if (!DRY_RUN) {
                       const update = {
@@ -215,7 +218,9 @@ jobs:
                 if (updatedAt >= staleCutoff && createdAt >= staleCutoff) continue;
                 if (updatedAt >= staleCutoff && await hasRealActivitySince(item, staleCutoff)) continue;
 
-                console.log(`Marking ${isPr ? 'PR' : 'issue'} #${item.number} as stale: no real activity since ${staleCutoff.toISOString()} (updated_at ${item.updated_at})`);
+                const kind = isPr ? 'PR' : 'issue';
+                console.log(`Marking ${kind} #${item.number} as stale: ` +
+                  `no real activity since ${staleCutoff.toISOString()} (updated_at ${item.updated_at})`);
                 marked++;
                 if (!DRY_RUN) {
                   await github.rest.issues.addLabels({
