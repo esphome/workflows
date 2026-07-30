@@ -55,6 +55,14 @@ on:
 
           This issue has now been marked as stale and will be closed if no
           further activity occurs. Thank you for your contributions.
+      ignored-users:
+        description: >
+          Comma-separated logins whose comments and reviews do not count as
+          activity — for machine accounts of type User, which the automatic
+          bot filter cannot detect (App bots are always ignored)
+        required: false
+        type: string
+        default: ''
       dry-run:
         description: Log what would happen without labeling, commenting or closing
         required: false
@@ -83,6 +91,7 @@ jobs:
             const EXEMPT_LABEL = "${{ inputs.exempt-label }}";
             const STALE_PR_MESSAGE = process.env.STALE_PR_MESSAGE;
             const STALE_ISSUE_MESSAGE = process.env.STALE_ISSUE_MESSAGE;
+            const IGNORED_USERS = new Set("${{ inputs.ignored-users }}".split(',').map(s => s.trim()).filter(Boolean));
             const DRY_RUN = ${{ inputs.dry-run }};
 
             const now = new Date();
@@ -111,7 +120,8 @@ jobs:
                 since: since.toISOString(),
                 per_page: 100,
               });
-              if (comments.some(c => c.user?.type === 'User' && new Date(c.created_at) > since)) {
+              const isRealUser = u => u?.type === 'User' && !IGNORED_USERS.has(u.login);
+              if (comments.some(c => isRealUser(c.user) && new Date(c.created_at) > since)) {
                 return true;
               }
 
@@ -144,7 +154,7 @@ jobs:
                   pull_number: item.number,
                   per_page: 100,
                 });
-                if (reviews.some(r => r.user?.type === 'User' && r.submitted_at && new Date(r.submitted_at) > since)) {
+                if (reviews.some(r => isRealUser(r.user) && r.submitted_at && new Date(r.submitted_at) > since)) {
                   return true;
                 }
               }
