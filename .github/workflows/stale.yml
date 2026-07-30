@@ -116,19 +116,26 @@ jobs:
               }
 
               if ('pull_request' in item) {
-                const {data: pull} = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: item.number,
-                });
-                const {data: head} = await github.rest.repos.getCommit({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  ref: pull.head.sha,
-                });
-                const lastCommitDate = head.commit?.committer?.date ?? head.commit?.author?.date;
-                if (lastCommitDate && new Date(lastCommitDate) > since) {
-                  return true;
+                // Isolated so a commit lookup failure (e.g. an unreachable
+                // fork head) falls through to the review check instead of
+                // skipping the whole item
+                try {
+                  const {data: pull} = await github.rest.pulls.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: item.number,
+                  });
+                  const {data: head} = await github.rest.repos.getCommit({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    ref: pull.head.sha,
+                  });
+                  const lastCommitDate = head.commit?.committer?.date ?? head.commit?.author?.date;
+                  if (lastCommitDate && new Date(lastCommitDate) > since) {
+                    return true;
+                  }
+                } catch (e) {
+                  console.error(`Commit check failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
                 }
 
                 const reviews = await github.paginate(github.rest.pulls.listReviews, {
@@ -241,7 +248,7 @@ jobs:
                   });
                 }
               } catch (e) {
-                console.error(`Failed to process #${item.number}: ${e.message}`);
+                console.error(`Failed to process #${item.number}: ${e instanceof Error ? e.message : e}`);
               }
             }
 
