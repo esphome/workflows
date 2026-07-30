@@ -122,14 +122,16 @@ jobs:
                 per_page: 100,
               });
               const isRealUser = u => u?.type === 'User' && !IGNORED_USERS.has(u.login);
-              if (comments.some(c => isRealUser(c.user) && new Date(c.created_at) > since)) {
+              if (comments.some(c => isRealUser(c.user) && new Date(c.created_at) >= since)) {
                 return true;
               }
 
               if ('pull_request' in item) {
-                // Isolated so a commit lookup failure (e.g. an unreachable
-                // fork head) falls through to the review check instead of
-                // skipping the whole item
+                // The head SHA of a fork PR is reachable through the base
+                // repository (GitHub keeps refs/pull/N/head there), so the
+                // base-repo commit API is correct for fork PRs too. Isolated
+                // so an unexpected lookup failure falls through to the review
+                // check instead of skipping the whole item
                 try {
                   const {data: pull} = await github.rest.pulls.get({
                     owner: context.repo.owner,
@@ -142,7 +144,7 @@ jobs:
                     ref: pull.head.sha,
                   });
                   const lastCommitDate = head.commit?.committer?.date ?? head.commit?.author?.date;
-                  if (lastCommitDate && new Date(lastCommitDate) > since) {
+                  if (lastCommitDate && new Date(lastCommitDate) >= since) {
                     return true;
                   }
                 } catch (e) {
@@ -155,7 +157,7 @@ jobs:
                   pull_number: item.number,
                   per_page: 100,
                 });
-                if (reviews.some(r => isRealUser(r.user) && r.submitted_at && new Date(r.submitted_at) > since)) {
+                if (reviews.some(r => isRealUser(r.user) && r.submitted_at && new Date(r.submitted_at) >= since)) {
                   return true;
                 }
               }
