@@ -51,7 +51,7 @@ jobs:
 ```
 
 A repository that publishes **several** combined manifests from the same
-release passes `groups` — a JSON array of `{"name": ..., "files": ...}` — and
+release passes `groups` — a JSON array of `{"name": ..., "files": [...]}` — and
 still calls the workflow **once**:
 
 ```yaml
@@ -64,8 +64,8 @@ jobs:
       esphome-version: 2026.5.3
       groups: |
         [
-          {"name": "esp-web-tools", "files": "esp-web-tools/esp32.yaml\nesp-web-tools/esp8266.yaml"},
-          {"name": "esphome-web", "files": "esphome-web/esp32.factory.yaml"}
+          {"name": "esp-web-tools", "files": ["esp-web-tools/esp32.yaml", "esp-web-tools/esp8266.yaml"]},
+          {"name": "esphome-web", "files": ["esphome-web/esp32.factory.yaml"]}
         ]
 ```
 
@@ -77,8 +77,8 @@ combined group alongside standalone devices:
 ```yaml
       groups: |
         [
-          {"name": "esp32-generic", "files": "esp32-generic/esp32-generic.factory.yaml"},
-          {"name": "", "files": "gl-inet/gl-s10.factory.yaml\nwt32/wt32-eth01.factory.yaml"}
+          {"name": "esp32-generic", "files": ["esp32-generic/esp32-generic.factory.yaml"]},
+          {"name": "", "files": ["gl-inet/gl-s10.factory.yaml", "wt32/wt32-eth01.factory.yaml"]}
         ]
 ```
 

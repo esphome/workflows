@@ -46,9 +46,9 @@ on:
         default: ""
       groups:
         description: >-
-          JSON array of {"name": ..., "files": ...} objects, to publish
+          JSON array of {"name": ..., "files": [...]} objects, to publish
           several combined manifests from one release. Each group builds its
-          own `files` (newline separated) into a single manifest named
+          own `files` (a JSON array of paths) into a single manifest named
           `name`, and every group's assets are uploaded to the same draft.
           Names must be unique; one group may use an empty name to publish
           its files as one manifest each instead of combining them.
@@ -104,15 +104,17 @@ jobs:
             # rather than combining them, for repositories that ship a
             # combined group alongside standalone devices. The uniqueness
             # check keeps that to at most one group.
-            # jq's or short-circuits, so .name is never indexed on a non-object.
+            # jq's or short-circuits, so .files/.name are never indexed on a
+            # non-object.
             if ! problem=$(jq -r '
               if type != "array" then "groups must be a JSON array"
               elif length == 0 then "groups must not be empty"
               elif any(.[];
                 (type != "object")
                 or ((.name | type) != "string")
-                or ((.files | type) != "string") or (.files == "")
-              ) then "every group needs a string name and a non-empty files string"
+                or ((.files | type) != "array") or ((.files | length) == 0)
+                or (.files | any(.[]; (type != "string") or (. == "")))
+              ) then "every group needs a string name and a non-empty files array of non-empty strings"
               elif ([.[].name] | length) != ([.[].name] | unique | length)
               then "group names must be unique"
               else empty
@@ -124,6 +126,11 @@ jobs:
               echo "::error::${problem}"
               exit 1
             fi
+            # Flatten each group's files array to the newline-separated string
+            # build.yml consumes, so the matrix leg passes it through unchanged.
+            # jq -c keeps the embedded newlines as \n, so the output stays on a
+            # single line for GITHUB_OUTPUT.
+            groups=$(jq -c '[.[] | {name, files: (.files | join("\n"))}]' <<< "${groups}")
           else
             files="${INPUT_FILES}"
             if [[ -z "${files}" ]]; then

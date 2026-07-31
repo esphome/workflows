@@ -38,8 +38,8 @@ jobs:
 
   # A repository publishing several combined manifests from one release (the
   # esphome/firmware shape) makes a single call with `groups`. Proves the
-  # build matrix fans a reusable-workflow call out per group, that per-group
-  # newline separated files survive the matrix, and that both groups'
+  # build matrix fans a reusable-workflow call out per group, that a group's
+  # multi-file `files` array survives the matrix, and that both groups'
   # artifacts land in the same run — which is what lets the one
   # upload-to-draft-release job publish all of them.
   build-to-draft-groups:
@@ -51,11 +51,11 @@ jobs:
         [
           {
             "name": "ci-draft-group-a",
-            "files": "tests/ci-combined-a.yaml\ntests/ci-combined-b.yaml"
+            "files": ["tests/ci-combined-a.yaml", "tests/ci-combined-b.yaml"]
           },
           {
             "name": "ci-draft-group-b",
-            "files": "tests/ci-combined-single.yaml"
+            "files": ["tests/ci-combined-single.yaml"]
           }
         ]
 
