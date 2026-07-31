@@ -1,5 +1,10 @@
 ---
 name: Stale issues and PRs
+# This workflow is only to be used within the ESPHome organisation on GitHub:
+# it authenticates with the ESPHome GitHub App via the
+# ESPHOME_GITHUB_APP_CLIENT_ID variable (resolved against the calling
+# repository or its organisation) and the ESPHOME_GITHUB_APP_PRIVATE_KEY
+# secret, so that everything it does is attributed to esphome[bot].
 
 on:
   workflow_call:
@@ -68,11 +73,13 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      ESPHOME_GITHUB_APP_PRIVATE_KEY:
+        description: Private key of the ESPHome GitHub App
+        required: true
 
-permissions:
-  contents: read        # repos.getCommit for the PR head commit date
-  issues: write
-  pull-requests: write
+# Every API call uses the ESPHome GitHub App token; GITHUB_TOKEN is never used.
+permissions: {}
 
 concurrency:
   group: stale
@@ -82,9 +89,25 @@ jobs:
   stale:
     runs-on: ubuntu-latest
     steps:
+      # A GitHub App token (not GITHUB_TOKEN) so that the stale label,
+      # comment and closure are attributed to esphome[bot], which is a Bot
+      # account and therefore never counted as real activity by the check
+      # below.
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.ESPHOME_GITHUB_APP_CLIENT_ID }}
+          private-key: ${{ secrets.ESPHOME_GITHUB_APP_PRIVATE_KEY }}
+          # Scope the minted App token to the minimum the script below needs.
+          permission-contents: read        # repos.getCommit for the PR head commit date
+          permission-issues: write         # list/create comments, add/remove labels, close issues
+          permission-pull-requests: write  # pulls.get, pulls.listReviews and closing pull requests
+
       - name: Process stale issues and PRs
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
+          github-token: ${{ steps.generate-token.outputs.token }}
           script: |
             const DAYS_BEFORE_STALE = ${{ inputs.days-before-stale }};
             const DAYS_BEFORE_CLOSE = ${{ inputs.days-before-close }};
