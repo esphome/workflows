@@ -70,7 +70,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Calculated calver version: ${version}"
 
-      - uses: release-drafter/release-drafter@eada3c96a64734dd381cfbda23511034e328ddb0 # v7.6.0
+      - uses: release-drafter/release-drafter@34d80673e067bdc0c24568d3af899c216adcfaa9 # v7.7.0
         id: drafter
         with:
           version: ${{ steps.calver.outputs.version }}
