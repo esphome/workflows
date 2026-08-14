@@ -114,14 +114,21 @@ jobs:
             echo "::error::No *.manifest.json assets found on draft release"
             exit 1
           fi
-          # --allow-escape-sequences (gh >= 2.97.0): gh refuses to write a
-          # response body containing terminal escape bytes, which a manifest
-          # carrying an escape byte in the embedded release body would trip.
+          # curl, not `gh api`: gh refuses to write a response body holding
+          # terminal escape bytes (a manifest embedding one in the release
+          # body trips that), and its --allow-escape-sequences opt-out needs
+          # gh >= 2.97.0, which the runner images do not all ship.
+          # -f so an HTTP error fails the step instead of writing the error
+          # body as a manifest; -L because the asset endpoint redirects to
+          # signed storage (which rejects a forwarded Authorization header,
+          # so no --location-trusted).
           while IFS=$'\t' read -r asset_id asset_name; do
             echo "Downloading ${asset_name}"
-            gh api --allow-escape-sequences -H "Accept: application/octet-stream" \
-              "repos/${GH_REPO}/releases/assets/${asset_id}" \
-              > "assets/${asset_name}"
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              "https://api.github.com/repos/${GH_REPO}/releases/assets/${asset_id}" \
+              -o "assets/${asset_name}"
           done <<< "${assets}"
 
       - name: Patch manifests with current release body

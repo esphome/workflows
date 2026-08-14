@@ -171,11 +171,18 @@ jobs:
               return 1
             fi
             echo "Downloading ${name}"
-            # --allow-escape-sequences (gh >= 2.97.0): gh refuses to write a
-            # response body containing terminal escape bytes. Firmware images
-            # are arbitrary binary, so they trip that guard at random.
-            gh api --allow-escape-sequences -H "Accept: application/octet-stream" \
-              "repos/${GH_REPO}/releases/assets/${asset_id}" > "${target}/${name}"
+            # curl, not `gh api`: gh refuses to write a response body holding
+            # terminal escape bytes, and its --allow-escape-sequences opt-out
+            # needs gh >= 2.97.0, which the runner images do not all ship.
+            # -f so an HTTP error fails the step instead of writing the error
+            # body as firmware; -L because the asset endpoint redirects to
+            # signed storage (which rejects a forwarded Authorization header,
+            # so no --location-trusted).
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              "https://api.github.com/repos/${GH_REPO}/releases/assets/${asset_id}" \
+              -o "${target}/${name}"
           }
 
           download "${DEVICE}.manifest.json"
