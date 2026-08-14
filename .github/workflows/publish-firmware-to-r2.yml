@@ -171,7 +171,10 @@ jobs:
               return 1
             fi
             echo "Downloading ${name}"
-            gh api -H "Accept: application/octet-stream" \
+            # --allow-escape-sequences (gh >= 2.97.0): gh refuses to write a
+            # response body containing terminal escape bytes. Firmware images
+            # are arbitrary binary, so they trip that guard at random.
+            gh api --allow-escape-sequences -H "Accept: application/octet-stream" \
               "repos/${GH_REPO}/releases/assets/${asset_id}" > "${target}/${name}"
           }
 
