@@ -228,7 +228,11 @@ jobs:
                     continue;
                   }
 
-                  if (await hasRealActivitySince(item, labeledAt)) {
+                  // Measure from whichever is later, so activity that is
+                  // itself older than the stale window cannot clear the label
+                  // on an item that was marked long ago.
+                  const since = labeledAt > staleCutoff ? labeledAt : staleCutoff;
+                  if (await hasRealActivitySince(item, since)) {
                     const kind = isPr ? 'PR' : 'issue';
                     console.log(`Unmarking ${kind} #${item.number}: real activity since it was marked stale`);
                     if (!DRY_RUN) {
