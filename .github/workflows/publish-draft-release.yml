@@ -1,10 +1,21 @@
 name: Publish Draft Release
 # Patches the draft release's *.manifest.json assets with the final release
-# notes, then publishes the draft. This workflow is only to be used within
-# the ESPHome organisation on GitHub: it authenticates with the ESPHome
-# GitHub App via the ESPHOME_GITHUB_APP_CLIENT_ID variable (resolved against
-# the calling repository or its organisation) and the
-# ESPHOME_GITHUB_APP_PRIVATE_KEY secret.
+# notes, then publishes the draft.
+#
+# The ESPHome GitHub App is optional. When it is configured (the
+# ESPHOME_GITHUB_APP_CLIENT_ID variable, resolved against the calling
+# repository or its organisation, and the ESPHOME_GITHUB_APP_PRIVATE_KEY
+# secret are both present) the job authenticates with an App token, so
+# publishing the release fires a downstream `release: published` event.
+# Otherwise it falls back to the default GITHUB_TOKEN, which is enough to
+# patch the manifests and publish the draft.
+#
+# IMPORTANT CAVEAT: a release published with GITHUB_TOKEN does NOT emit a
+# downstream `release: published` event. GitHub suppresses events for
+# actions taken with the default token to prevent recursive workflow runs.
+# Consumers that react to a publish must therefore trigger off `workflow_run`
+# of their Release workflow on the fallback path rather than off
+# `release: published`. (esphome-project-template does exactly this.)
 
 on:
   workflow_call:
@@ -14,31 +25,46 @@ on:
         required: false
         type: string
         default: ""
+      environment:
+        description: >-
+          Deployment environment gating the publish job (must exist in the
+          calling repository). Defaults to "release"; pass an empty string to
+          run without an environment.
+        required: false
+        type: string
+        default: release
     secrets:
       ESPHOME_GITHUB_APP_PRIVATE_KEY:
         description: Private key of the ESPHome GitHub App
-        required: true
+        required: false
 
 jobs:
   release:
     name: Patch manifests and publish
     runs-on: ubuntu-latest
-    # The release environment must exist in the calling repository; it gates
-    # publishing behind any protection rules configured there.
-    environment: release
+    # The environment (default "release") must exist in the calling
+    # repository; it gates publishing behind any protection rules configured
+    # there. Outside consumers without such an environment can pass an empty
+    # string to opt out.
+    environment: ${{ inputs.environment }}
     concurrency:
       group: publish-draft-release-${{ inputs.tag || 'latest-draft' }}
       cancel-in-progress: false
-    # Every step authenticates with the ESPHome GitHub App token (see the
-    # comment on the first step); the default GITHUB_TOKEN is never used.
-    permissions: {}
+    # contents: write lets the fallback GITHUB_TOKEN read the draft, replace
+    # its manifest assets and publish it. When an App token is used instead,
+    # GITHUB_TOKEN simply goes unused.
+    permissions:
+      contents: write
     steps:
-      # We use a GitHub App token (not GITHUB_TOKEN) so that publishing the
-      # release fires a `release: published` event downstream — the default
-      # GITHUB_TOKEN intentionally does not trigger further workflows, which
-      # would leave the publish workflow dormant.
+      # When the ESPHome GitHub App is configured we mint an App token (not
+      # GITHUB_TOKEN) so that publishing the release fires a `release:
+      # published` event downstream; the default GITHUB_TOKEN intentionally
+      # does not trigger further workflows. When the App is absent this step
+      # is skipped and every step below falls back to GITHUB_TOKEN (see the
+      # caveat in the header comment).
       - name: Generate a token
         id: generate-token
+        if: ${{ vars.ESPHOME_GITHUB_APP_CLIENT_ID != '' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.ESPHOME_GITHUB_APP_CLIENT_ID }}
@@ -50,7 +76,7 @@ jobs:
       - name: Resolve draft release
         id: find
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token || github.token }}
           GH_REPO: ${{ github.repository }}
           INPUT_TAG: ${{ inputs.tag }}
         run: |
@@ -94,7 +120,7 @@ jobs:
 
       - name: Download manifest assets
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token || github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_ID: ${{ steps.find.outputs.release_id }}
         run: |
@@ -146,7 +172,7 @@ jobs:
 
       - name: Re-upload patched manifests to draft release
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token || github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_ID: ${{ steps.find.outputs.release_id }}
         run: |
@@ -178,7 +204,7 @@ jobs:
 
       - name: Publish release
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token || github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_ID: ${{ steps.find.outputs.release_id }}
           TAG: ${{ steps.find.outputs.tag }}
