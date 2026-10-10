@@ -187,29 +187,50 @@ jobs:
             }
 
             // true when the PR has merge conflicts, false when it is
-            // mergeable, null when unknown. GitHub computes mergeability
-            // lazily: the first pulls.get after the base branch moved
-            // returns `mergeable: null` and starts the merge test, so a null
-            // is fetched again after a short wait, a couple of times, before
-            // giving up; a failed lookup is unknown too. `dirty` is the only
-            // state that means conflicts; `behind`, `blocked` and `unstable`
-            // do not.
-            const MERGEABILITY_RETRIES = 2;
-            const MERGEABILITY_RETRY_MS = 3000;
-            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            // mergeable, null when unknown (not computed yet, or the lookup
+            // failed). `dirty` is the only state that means conflicts;
+            // `behind`, `blocked` and `unstable` do not.
             async function hasMergeConflicts(item) {
               try {
-                let pull = await getPull(item);
-                for (let i = 0; i < MERGEABILITY_RETRIES && pull.mergeable === null; i++) {
-                  await sleep(MERGEABILITY_RETRY_MS);
-                  pulls.delete(item.number);
-                  pull = await getPull(item);
-                }
+                const pull = await getPull(item);
                 if (pull.mergeable === null) return null;
                 return pull.mergeable === false && pull.mergeable_state === 'dirty';
               } catch (e) {
                 console.error(`Conflict check failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
                 return null;
+              }
+            }
+
+            // GitHub computes mergeability lazily: the first pulls.get after
+            // the base branch moved returns `mergeable: null` and only starts
+            // the merge test. Fetch every PR up front so the tests run in
+            // parallel, then wait once and fetch the undecided ones again,
+            // rather than sleeping inside the loop one PR at a time.
+            const MERGEABILITY_RETRIES = 2;
+            const MERGEABILITY_RETRY_MS = 5000;
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            async function warmMergeability(items) {
+              let pending = [];
+              for (const item of items) {
+                try {
+                  if ((await getPull(item)).mergeable === null) pending.push(item);
+                } catch (e) {
+                  console.error(`Pull lookup failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
+                }
+              }
+              for (let i = 0; i < MERGEABILITY_RETRIES && pending.length > 0; i++) {
+                console.log(`Waiting for GitHub to compute mergeability of ${pending.length} PRs`);
+                await sleep(MERGEABILITY_RETRY_MS);
+                const still = [];
+                for (const item of pending) {
+                  pulls.delete(item.number);
+                  try {
+                    if ((await getPull(item)).mergeable === null) still.push(item);
+                  } catch (e) {
+                    console.error(`Pull lookup failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
+                  }
+                }
+                pending = still;
               }
             }
 
@@ -318,6 +339,9 @@ jobs:
               per_page: 100,
             });
             console.log(`Processing ${openItems.length} open items`);
+            if (conflictCutoff) {
+              await warmMergeability(openItems.filter(item => 'pull_request' in item && !item.locked));
+            }
 
             let marked = 0, unmarked = 0, closed = 0, conflicts = 0, resolved = 0, unknown = 0;
 
@@ -347,6 +371,7 @@ jobs:
                     const conflicting = await hasMergeConflicts(item);
                     if (conflicting === null) {
                       console.log(`Skipping PR #${item.number}: mergeability not known yet`);
+                      unknown++;
                       continue;
                     }
                     if (conflicting) {
@@ -403,9 +428,9 @@ jobs:
                 // still unresolved, whatever else happened on it meanwhile.
                 // A conflict still inside its window falls through to the
                 // inactivity check like any other PR.
+                let labelled = isPr && labels.includes(CONFLICT_LABEL);
                 if (isPr && conflictCutoff) {
                   const conflicting = await hasMergeConflicts(item);
-                  const labelled = labels.includes(CONFLICT_LABEL);
                   if (conflicting === null) {
                     console.log(`PR #${item.number}: mergeability not known yet`);
                     unknown++;
@@ -435,6 +460,7 @@ jobs:
                       await removeLabel(item, CONFLICT_LABEL);
                     }
                     resolved++;
+                    labelled = false;
                   }
                   if (conflicting === true && labelled) {
                     const conflictLabeledAt = await labelDate(item, CONFLICT_LABEL);
@@ -463,7 +489,7 @@ jobs:
                   `no real activity since ${staleCutoff.toISOString()} (updated_at ${item.updated_at})`);
                 if (!DRY_RUN) {
                   const message = !isPr ? STALE_ISSUE_MESSAGE
-                    : conflictCutoff && labels.includes(CONFLICT_LABEL) ? STALE_CONFLICTING_PR_MESSAGE
+                    : conflictCutoff && labelled ? STALE_CONFLICTING_PR_MESSAGE
                     : STALE_PR_MESSAGE;
                   await markStale(item, message);
                 }
