@@ -16,10 +16,9 @@ on:
         default: 90
       days-before-stale-conflicting:
         description: >
-          Days without real activity before a PR with merge conflicts is
-          marked stale; a shorter window than days-before-stale, since
-          merging the base branch is a small ask. 0 disables the shorter
-          window and conflicting PRs follow days-before-stale
+          Days after a PR is labelled for merge conflicts before it is marked
+          stale if they are still unresolved, regardless of other activity.
+          0 (the default) disables conflict handling altogether
         required: false
         type: number
         default: 0
@@ -40,9 +39,9 @@ on:
         default: not-stale
       conflict-label:
         description: >
-          Label added with the stale label to a PR marked stale for merge
-          conflicts. While it is present, comments do not unmark the PR;
-          only resolving the conflicts does. Removed once the PR is mergeable
+          Label added, with a comment, as soon as a PR has merge conflicts.
+          While it is present, comments do not unmark a stale PR; only
+          resolving the conflicts does. Removed once the PR is mergeable
         required: false
         type: string
         default: needs-rebase
@@ -61,14 +60,24 @@ on:
           changes.
 
           Thank you for your contribution!
-      stale-conflicting-pr-message:
-        description: Comment posted when a PR with merge conflicts is marked stale
+      conflict-pr-message:
+        description: Comment posted when a PR is labelled for merge conflicts
         required: false
         type: string
         default: >
-          This pull request has merge conflicts and there hasn't been any
-          activity on it recently, so it has been marked as stale and will be
-          closed if the conflicts are not resolved.
+          This pull request has merge conflicts. Please merge the latest
+          development branch into your branch to resolve them.
+
+          If the conflicts are not resolved, this pull request will be marked
+          as stale and then closed.
+      stale-conflicting-pr-message:
+        description: Comment posted when a PR with unresolved merge conflicts is marked stale
+        required: false
+        type: string
+        default: >
+          The merge conflicts on this pull request have not been resolved, so
+          it has been marked as stale and will be closed if they are not
+          resolved soon.
 
           Please merge the latest development branch into your branch. Once
           the pull request is mergeable again the stale label is removed.
@@ -146,6 +155,7 @@ jobs:
             const EXEMPT_LABEL = "${{ inputs.exempt-label }}";
             const CONFLICT_LABEL = "${{ inputs.conflict-label }}";
             const STALE_PR_MESSAGE = process.env.STALE_PR_MESSAGE;
+            const CONFLICT_PR_MESSAGE = process.env.CONFLICT_PR_MESSAGE;
             const STALE_CONFLICTING_PR_MESSAGE = process.env.STALE_CONFLICTING_PR_MESSAGE;
             const STALE_ISSUE_MESSAGE = process.env.STALE_ISSUE_MESSAGE;
             const IGNORED_USERS = new Set("${{ inputs.ignored-users }}".split(',').map(s => s.trim()).filter(Boolean));
@@ -154,14 +164,13 @@ jobs:
             const now = new Date();
             const staleCutoff = new Date(now.getTime() - DAYS_BEFORE_STALE * 24 * 60 * 60 * 1000);
             const closeCutoff = new Date(now.getTime() - DAYS_BEFORE_CLOSE * 24 * 60 * 60 * 1000);
-            // Only meaningful when it is a shorter window than the general one
-            const conflictCutoff = DAYS_BEFORE_STALE_CONFLICTING > 0 && DAYS_BEFORE_STALE_CONFLICTING < DAYS_BEFORE_STALE
+            const conflictCutoff = DAYS_BEFORE_STALE_CONFLICTING > 0
               ? new Date(now.getTime() - DAYS_BEFORE_STALE_CONFLICTING * 24 * 60 * 60 * 1000)
               : null;
 
             console.log(`Will mark items without real activity since: ${staleCutoff.toISOString()}`);
             if (conflictCutoff) {
-              console.log(`Will mark PRs with merge conflicts without real activity since: ${conflictCutoff.toISOString()}`);
+              console.log(`Will mark PRs labelled for merge conflicts before: ${conflictCutoff.toISOString()}`);
             }
             console.log(`Will close items marked stale before: ${closeCutoff.toISOString()}`);
 
@@ -264,16 +273,34 @@ jobs:
               return false;
             }
 
-            async function staleLabelDate(item) {
+            async function labelDate(item, name) {
               const events = await github.paginate(github.rest.issues.listEvents, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: item.number,
                 per_page: 100,
               });
-              const labelings = events.filter(e => e.event === 'labeled' && e.label?.name === STALE_LABEL);
+              const labelings = events.filter(e => e.event === 'labeled' && e.label?.name === name);
               const last = labelings[labelings.length - 1];
               return last ? new Date(last.created_at) : null;
+            }
+
+            async function markStale(item, body) {
+              // Comment before labeling: if the comment fails the item is
+              // retried next run, instead of a labeled-but-unwarned item
+              // being closed later without explanation
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: item.number,
+                body,
+              });
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: item.number,
+                labels: [STALE_LABEL],
+              });
             }
 
             const openItems = await github.paginate(github.rest.issues.listForRepo, {
@@ -284,7 +311,7 @@ jobs:
             });
             console.log(`Processing ${openItems.length} open items`);
 
-            let marked = 0, unmarked = 0, closed = 0;
+            let marked = 0, unmarked = 0, closed = 0, conflicts = 0, resolved = 0;
 
             for (const item of openItems) {
               if (item.locked) continue;
@@ -298,7 +325,7 @@ jobs:
               try {
                 if (labels.includes(STALE_LABEL)) {
                   // Already stale: real activity unmarks, silence closes
-                  const labeledAt = await staleLabelDate(item);
+                  const labeledAt = await labelDate(item, STALE_LABEL);
                   if (!labeledAt) {
                     console.warn(`No ${STALE_LABEL} labeling event found for #${item.number}; skipping`);
                     continue;
@@ -322,6 +349,7 @@ jobs:
                       if (!DRY_RUN) {
                         await removeLabel(item, CONFLICT_LABEL);
                       }
+                      resolved++;
                     }
                   }
 
@@ -338,8 +366,9 @@ jobs:
                     unmarked++;
                   } else if (labeledAt < closeCutoff) {
                     const kind = isPr ? 'PR' : 'issue';
+                    const reason = rescued ? 'no real activity' : 'merge conflicts unresolved';
                     console.log(`Closing ${kind} #${item.number}: ` +
-                      `${rescued ? 'no real activity' : 'merge conflicts unresolved'} since stale on ${labeledAt.toISOString()}`);
+                      `${reason} since stale on ${labeledAt.toISOString()}`);
                     if (!DRY_RUN) {
                       const update = {
                         owner: context.repo.owner,
@@ -358,45 +387,66 @@ jobs:
                   continue;
                 }
 
-                // Not stale yet. A PR with merge conflicts uses the shorter
-                // window; the conflict check costs an API call, so only make
-                // it for PRs old enough to fall inside that window.
-                let cutoff = staleCutoff;
-                let message = isPr ? STALE_PR_MESSAGE : STALE_ISSUE_MESSAGE;
-                let why = 'no real activity';
-                const conflicting = isPr && conflictCutoff && createdAt < conflictCutoff
-                  && await hasMergeConflicts(item) === true;
-                if (conflicting) {
-                  cutoff = conflictCutoff;
-                  message = STALE_CONFLICTING_PR_MESSAGE;
-                  why = 'merge conflicts and no real activity';
+                // Not stale yet. Merge conflicts are handled first: a PR
+                // is labelled and told the moment they appear, and marked
+                // stale once the label is old enough with the conflicts
+                // still unresolved, whatever else happened on it meanwhile.
+                // A conflict still inside its window falls through to the
+                // inactivity check like any other PR.
+                if (isPr && conflictCutoff) {
+                  const conflicting = await hasMergeConflicts(item);
+                  const labelled = labels.includes(CONFLICT_LABEL);
+                  if (conflicting === true && !labelled) {
+                    console.log(`Labelling PR #${item.number} for merge conflicts`);
+                    if (!DRY_RUN) {
+                      await github.rest.issues.createComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: item.number,
+                        body: CONFLICT_PR_MESSAGE,
+                      });
+                      await github.rest.issues.addLabels({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: item.number,
+                        labels: [CONFLICT_LABEL],
+                      });
+                    }
+                    conflicts++;
+                    continue;
+                  }
+                  if (conflicting === false && labelled) {
+                    console.log(`PR #${item.number} is mergeable again; removing ${CONFLICT_LABEL}`);
+                    if (!DRY_RUN) {
+                      await removeLabel(item, CONFLICT_LABEL);
+                    }
+                    resolved++;
+                  }
+                  if (conflicting === true && labelled) {
+                    const conflictLabeledAt = await labelDate(item, CONFLICT_LABEL);
+                    if (conflictLabeledAt && conflictLabeledAt < conflictCutoff) {
+                      console.log(`Marking PR #${item.number} as stale: ` +
+                        `merge conflicts unresolved since ${conflictLabeledAt.toISOString()}`);
+                      if (!DRY_RUN) {
+                        await markStale(item, STALE_CONFLICTING_PR_MESSAGE);
+                      }
+                      marked++;
+                      continue;
+                    }
+                  }
                 }
 
                 // An old updated_at is conclusive; a fresh one may be a
                 // phantom update and needs verification, but only for items
                 // old enough to possibly be inactive.
-                if (updatedAt >= cutoff && createdAt >= cutoff) continue;
-                if (updatedAt >= cutoff && await hasRealActivitySince(item, cutoff)) continue;
+                if (updatedAt >= staleCutoff && createdAt >= staleCutoff) continue;
+                if (updatedAt >= staleCutoff && await hasRealActivitySince(item, staleCutoff)) continue;
 
                 const kind = isPr ? 'PR' : 'issue';
                 console.log(`Marking ${kind} #${item.number} as stale: ` +
-                  `${why} since ${cutoff.toISOString()} (updated_at ${item.updated_at})`);
+                  `no real activity since ${staleCutoff.toISOString()} (updated_at ${item.updated_at})`);
                 if (!DRY_RUN) {
-                  // Comment before labeling: if the comment fails the item is
-                  // retried next run, instead of a labeled-but-unwarned item
-                  // being closed later without explanation
-                  await github.rest.issues.createComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: item.number,
-                    body: message,
-                  });
-                  await github.rest.issues.addLabels({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: item.number,
-                    labels: conflicting ? [STALE_LABEL, CONFLICT_LABEL] : [STALE_LABEL],
-                  });
+                  await markStale(item, isPr ? STALE_PR_MESSAGE : STALE_ISSUE_MESSAGE);
                 }
                 marked++;
               } catch (e) {
@@ -404,8 +454,11 @@ jobs:
               }
             }
 
-            console.log(`Done${DRY_RUN ? ' (dry run)' : ''}: ${marked} marked, ${unmarked} unmarked, ${closed} closed`);
+            console.log(`Done${DRY_RUN ? ' (dry run)' : ''}: ` +
+              `${marked} marked, ${unmarked} unmarked, ${closed} closed, ` +
+              `${conflicts} labelled for merge conflicts, ${resolved} conflicts resolved`);
         env:
           STALE_PR_MESSAGE: ${{ inputs.stale-pr-message }}
+          CONFLICT_PR_MESSAGE: ${{ inputs.conflict-pr-message }}
           STALE_CONFLICTING_PR_MESSAGE: ${{ inputs.stale-conflicting-pr-message }}
           STALE_ISSUE_MESSAGE: ${{ inputs.stale-issue-message }}
