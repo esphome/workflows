@@ -67,9 +67,6 @@ on:
         default: >
           This pull request has merge conflicts. Please merge the latest
           development branch into your branch to resolve them.
-
-          If the conflicts are not resolved, this pull request will be marked
-          as stale and then closed.
       stale-conflicting-pr-message:
         description: Comment posted when a PR with unresolved merge conflicts is marked stale
         required: false
