@@ -14,6 +14,15 @@ on:
         required: false
         type: number
         default: 90
+      days-before-stale-conflicting:
+        description: >
+          Days without real activity before a PR with merge conflicts is
+          marked stale; a shorter window than days-before-stale, since
+          merging the base branch is a small ask. 0 disables the shorter
+          window and conflicting PRs follow days-before-stale
+        required: false
+        type: number
+        default: 0
       days-before-close:
         description: Days after the stale label before an item is closed
         required: false
@@ -29,6 +38,14 @@ on:
         required: false
         type: string
         default: not-stale
+      conflict-label:
+        description: >
+          Label added with the stale label to a PR marked stale for merge
+          conflicts. While it is present, comments do not unmark the PR;
+          only resolving the conflicts does. Removed once the PR is mergeable
+        required: false
+        type: string
+        default: needs-rebase
       stale-pr-message:
         description: Comment posted when a PR is marked stale
         required: false
@@ -42,6 +59,19 @@ on:
           to keep it open. Also, please rebase your PR onto the latest
           development branch to ensure that it's up to date with the latest
           changes.
+
+          Thank you for your contribution!
+      stale-conflicting-pr-message:
+        description: Comment posted when a PR with merge conflicts is marked stale
+        required: false
+        type: string
+        default: >
+          This pull request has merge conflicts and there hasn't been any
+          activity on it recently, so it has been marked as stale and will be
+          closed if the conflicts are not resolved.
+
+          Please merge the latest development branch into your branch. Once
+          the pull request is mergeable again the stale label is removed.
 
           Thank you for your contribution!
       stale-issue-message:
@@ -110,10 +140,13 @@ jobs:
           github-token: ${{ steps.generate-token.outputs.token }}
           script: |
             const DAYS_BEFORE_STALE = ${{ inputs.days-before-stale }};
+            const DAYS_BEFORE_STALE_CONFLICTING = ${{ inputs.days-before-stale-conflicting }};
             const DAYS_BEFORE_CLOSE = ${{ inputs.days-before-close }};
             const STALE_LABEL = "${{ inputs.stale-label }}";
             const EXEMPT_LABEL = "${{ inputs.exempt-label }}";
+            const CONFLICT_LABEL = "${{ inputs.conflict-label }}";
             const STALE_PR_MESSAGE = process.env.STALE_PR_MESSAGE;
+            const STALE_CONFLICTING_PR_MESSAGE = process.env.STALE_CONFLICTING_PR_MESSAGE;
             const STALE_ISSUE_MESSAGE = process.env.STALE_ISSUE_MESSAGE;
             const IGNORED_USERS = new Set("${{ inputs.ignored-users }}".split(',').map(s => s.trim()).filter(Boolean));
             const DRY_RUN = ${{ inputs.dry-run }};
@@ -121,8 +154,15 @@ jobs:
             const now = new Date();
             const staleCutoff = new Date(now.getTime() - DAYS_BEFORE_STALE * 24 * 60 * 60 * 1000);
             const closeCutoff = new Date(now.getTime() - DAYS_BEFORE_CLOSE * 24 * 60 * 60 * 1000);
+            // Only meaningful when it is a shorter window than the general one
+            const conflictCutoff = DAYS_BEFORE_STALE_CONFLICTING > 0 && DAYS_BEFORE_STALE_CONFLICTING < DAYS_BEFORE_STALE
+              ? new Date(now.getTime() - DAYS_BEFORE_STALE_CONFLICTING * 24 * 60 * 60 * 1000)
+              : null;
 
             console.log(`Will mark items without real activity since: ${staleCutoff.toISOString()}`);
+            if (conflictCutoff) {
+              console.log(`Will mark PRs with merge conflicts without real activity since: ${conflictCutoff.toISOString()}`);
+            }
             console.log(`Will close items marked stale before: ${closeCutoff.toISOString()}`);
 
             // The GitHub updated_at timestamp moves on events that are not
@@ -133,6 +173,46 @@ jobs:
             // activity also bumps updated_at, the timestamp is an upper
             // bound: an item whose updated_at is old is conclusively
             // inactive, and only apparently-fresh items need verification.
+            // One pulls.get per PR per run, shared by the conflict check and
+            // the head-commit lookup below
+            const pulls = new Map();
+            async function getPull(item) {
+              if (!pulls.has(item.number)) {
+                const {data} = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: item.number,
+                });
+                pulls.set(item.number, data);
+              }
+              return pulls.get(item.number);
+            }
+
+            // true when the PR has merge conflicts, false when it is
+            // mergeable, null when unknown: GitHub computes mergeability
+            // lazily and `mergeable` stays null until it has, and a failed
+            // lookup is treated the same way. `dirty` is the only state that
+            // means conflicts; `behind`, `blocked` and `unstable` do not.
+            async function hasMergeConflicts(item) {
+              try {
+                const pull = await getPull(item);
+                if (pull.mergeable === null) return null;
+                return pull.mergeable === false && pull.mergeable_state === 'dirty';
+              } catch (e) {
+                console.error(`Conflict check failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
+                return null;
+              }
+            }
+
+            async function removeLabel(item, name) {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: item.number,
+                name,
+              });
+            }
+
             async function hasRealActivitySince(item, since) {
               // Note: the `since` filter of listComments matches the comment
               // updated_at, so an edited old comment reappears here; compare
@@ -156,11 +236,7 @@ jobs:
                 // so an unexpected lookup failure falls through to the review
                 // check instead of skipping the whole item
                 try {
-                  const {data: pull} = await github.rest.pulls.get({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    pull_number: item.number,
-                  });
+                  const pull = await getPull(item);
                   const {data: head} = await github.rest.repos.getCommit({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
@@ -228,26 +304,42 @@ jobs:
                     continue;
                   }
 
+                  // Marked stale for merge conflicts: a comment does not keep
+                  // it open, only resolving the conflicts does. Once it is
+                  // mergeable the conflict label goes and the usual activity
+                  // check applies, which the resolving commit satisfies.
+                  let rescued = true;
+                  if (isPr && labels.includes(CONFLICT_LABEL)) {
+                    const conflicting = await hasMergeConflicts(item);
+                    if (conflicting === null) {
+                      console.log(`Skipping PR #${item.number}: mergeability not known yet`);
+                      continue;
+                    }
+                    if (conflicting) {
+                      rescued = false;
+                    } else {
+                      console.log(`PR #${item.number} is mergeable again; removing ${CONFLICT_LABEL}`);
+                      if (!DRY_RUN) {
+                        await removeLabel(item, CONFLICT_LABEL);
+                      }
+                    }
+                  }
+
                   // Measure from whichever is later, so activity that is
                   // itself older than the stale window cannot clear the label
                   // on an item that was marked long ago.
                   const since = labeledAt > staleCutoff ? labeledAt : staleCutoff;
-                  if (await hasRealActivitySince(item, since)) {
+                  if (rescued && await hasRealActivitySince(item, since)) {
                     const kind = isPr ? 'PR' : 'issue';
                     console.log(`Unmarking ${kind} #${item.number}: real activity since it was marked stale`);
                     if (!DRY_RUN) {
-                      await github.rest.issues.removeLabel({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: item.number,
-                        name: STALE_LABEL,
-                      });
+                      await removeLabel(item, STALE_LABEL);
                     }
                     unmarked++;
                   } else if (labeledAt < closeCutoff) {
                     const kind = isPr ? 'PR' : 'issue';
                     console.log(`Closing ${kind} #${item.number}: ` +
-                      `no real activity since stale on ${labeledAt.toISOString()}`);
+                      `${rescued ? 'no real activity' : 'merge conflicts unresolved'} since stale on ${labeledAt.toISOString()}`);
                     if (!DRY_RUN) {
                       const update = {
                         owner: context.repo.owner,
@@ -266,15 +358,29 @@ jobs:
                   continue;
                 }
 
-                // Not stale yet. An old updated_at is conclusive; a fresh one
-                // may be a phantom update and needs verification, but only
-                // for items old enough to possibly be inactive.
-                if (updatedAt >= staleCutoff && createdAt >= staleCutoff) continue;
-                if (updatedAt >= staleCutoff && await hasRealActivitySince(item, staleCutoff)) continue;
+                // Not stale yet. A PR with merge conflicts uses the shorter
+                // window; the conflict check costs an API call, so only make
+                // it for PRs old enough to fall inside that window.
+                let cutoff = staleCutoff;
+                let message = isPr ? STALE_PR_MESSAGE : STALE_ISSUE_MESSAGE;
+                let why = 'no real activity';
+                const conflicting = isPr && conflictCutoff && createdAt < conflictCutoff
+                  && await hasMergeConflicts(item) === true;
+                if (conflicting) {
+                  cutoff = conflictCutoff;
+                  message = STALE_CONFLICTING_PR_MESSAGE;
+                  why = 'merge conflicts and no real activity';
+                }
+
+                // An old updated_at is conclusive; a fresh one may be a
+                // phantom update and needs verification, but only for items
+                // old enough to possibly be inactive.
+                if (updatedAt >= cutoff && createdAt >= cutoff) continue;
+                if (updatedAt >= cutoff && await hasRealActivitySince(item, cutoff)) continue;
 
                 const kind = isPr ? 'PR' : 'issue';
                 console.log(`Marking ${kind} #${item.number} as stale: ` +
-                  `no real activity since ${staleCutoff.toISOString()} (updated_at ${item.updated_at})`);
+                  `${why} since ${cutoff.toISOString()} (updated_at ${item.updated_at})`);
                 if (!DRY_RUN) {
                   // Comment before labeling: if the comment fails the item is
                   // retried next run, instead of a labeled-but-unwarned item
@@ -283,13 +389,13 @@ jobs:
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     issue_number: item.number,
-                    body: isPr ? STALE_PR_MESSAGE : STALE_ISSUE_MESSAGE,
+                    body: message,
                   });
                   await github.rest.issues.addLabels({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     issue_number: item.number,
-                    labels: [STALE_LABEL],
+                    labels: conflicting ? [STALE_LABEL, CONFLICT_LABEL] : [STALE_LABEL],
                   });
                 }
                 marked++;
@@ -301,4 +407,5 @@ jobs:
             console.log(`Done${DRY_RUN ? ' (dry run)' : ''}: ${marked} marked, ${unmarked} unmarked, ${closed} closed`);
         env:
           STALE_PR_MESSAGE: ${{ inputs.stale-pr-message }}
+          STALE_CONFLICTING_PR_MESSAGE: ${{ inputs.stale-conflicting-pr-message }}
           STALE_ISSUE_MESSAGE: ${{ inputs.stale-issue-message }}
