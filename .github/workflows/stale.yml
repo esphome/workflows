@@ -308,7 +308,7 @@ jobs:
             });
             console.log(`Processing ${openItems.length} open items`);
 
-            let marked = 0, unmarked = 0, closed = 0, conflicts = 0, resolved = 0;
+            let marked = 0, unmarked = 0, closed = 0, conflicts = 0, resolved = 0, unknown = 0;
 
             for (const item of openItems) {
               if (item.locked) continue;
@@ -395,6 +395,10 @@ jobs:
                 if (isPr && conflictCutoff) {
                   const conflicting = await hasMergeConflicts(item);
                   const labelled = labels.includes(CONFLICT_LABEL);
+                  if (conflicting === null) {
+                    console.log(`PR #${item.number}: mergeability not known yet`);
+                    unknown++;
+                  }
                   if (conflicting === true && !labelled) {
                     console.log(`Labelling PR #${item.number} for merge conflicts`);
                     if (!DRY_RUN) {
@@ -460,7 +464,8 @@ jobs:
 
             console.log(`Done${DRY_RUN ? ' (dry run)' : ''}: ` +
               `${marked} marked, ${unmarked} unmarked, ${closed} closed, ` +
-              `${conflicts} labelled for merge conflicts, ${resolved} conflicts resolved`);
+              `${conflicts} labelled for merge conflicts, ${resolved} conflicts resolved, ` +
+              `${unknown} with mergeability not known yet`);
         env:
           STALE_PR_MESSAGE: ${{ inputs.stale-pr-message }}
           CONFLICT_PR_MESSAGE: ${{ inputs.conflict-pr-message }}
