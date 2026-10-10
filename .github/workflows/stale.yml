@@ -171,14 +171,6 @@ jobs:
             }
             console.log(`Will close items marked stale before: ${closeCutoff.toISOString()}`);
 
-            // The GitHub updated_at timestamp moves on events that are not
-            // real activity: bots editing their comments in place, label
-            // changes and similar housekeeping. Real activity is therefore
-            // measured directly: comments *created* by users, and for PRs
-            // also commits and review submissions. Since every kind of real
-            // activity also bumps updated_at, the timestamp is an upper
-            // bound: an item whose updated_at is old is conclusively
-            // inactive, and only apparently-fresh items need verification.
             // One pulls.get per PR per run, shared by the conflict check and
             // the head-commit lookup below
             const pulls = new Map();
@@ -219,6 +211,14 @@ jobs:
               });
             }
 
+            // The GitHub updated_at timestamp moves on events that are not
+            // real activity: bots editing their comments in place, label
+            // changes and similar housekeeping. Real activity is therefore
+            // measured directly: comments *created* by users, and for PRs
+            // also commits and review submissions. Since every kind of real
+            // activity also bumps updated_at, the timestamp is an upper
+            // bound: an item whose updated_at is old is conclusively
+            // inactive, and only apparently-fresh items need verification.
             async function hasRealActivitySince(item, since) {
               // Note: the `since` filter of listComments matches the comment
               // updated_at, so an edited old comment reappears here; compare
@@ -328,12 +328,11 @@ jobs:
                     continue;
                   }
 
-                  // Marked stale for merge conflicts: a comment does not keep
-                  // it open, only resolving the conflicts does. Once it is
-                  // mergeable the conflict label goes and the usual activity
-                  // check applies, which the resolving commit satisfies.
+                  // Stale with the conflict label: a comment does not keep
+                  // it open, only resolving the conflicts does, and doing so
+                  // clears both labels as the conflict comment promised.
                   let rescued = true;
-                  if (isPr && labels.includes(CONFLICT_LABEL)) {
+                  if (isPr && conflictCutoff && labels.includes(CONFLICT_LABEL)) {
                     const conflicting = await hasMergeConflicts(item);
                     if (conflicting === null) {
                       console.log(`Skipping PR #${item.number}: mergeability not known yet`);
@@ -342,11 +341,14 @@ jobs:
                     if (conflicting) {
                       rescued = false;
                     } else {
-                      console.log(`PR #${item.number} is mergeable again; removing ${CONFLICT_LABEL}`);
+                      console.log(`Unmarking PR #${item.number}: mergeable again`);
                       if (!DRY_RUN) {
                         await removeLabel(item, CONFLICT_LABEL);
+                        await removeLabel(item, STALE_LABEL);
                       }
                       resolved++;
+                      unmarked++;
+                      continue;
                     }
                   }
 
@@ -439,11 +441,16 @@ jobs:
                 if (updatedAt >= staleCutoff && createdAt >= staleCutoff) continue;
                 if (updatedAt >= staleCutoff && await hasRealActivitySince(item, staleCutoff)) continue;
 
+                // A PR carrying the conflict label is told so, since a
+                // comment will not keep it open once it is stale
                 const kind = isPr ? 'PR' : 'issue';
                 console.log(`Marking ${kind} #${item.number} as stale: ` +
                   `no real activity since ${staleCutoff.toISOString()} (updated_at ${item.updated_at})`);
                 if (!DRY_RUN) {
-                  await markStale(item, isPr ? STALE_PR_MESSAGE : STALE_ISSUE_MESSAGE);
+                  const message = !isPr ? STALE_ISSUE_MESSAGE
+                    : conflictCutoff && labels.includes(CONFLICT_LABEL) ? STALE_CONFLICTING_PR_MESSAGE
+                    : STALE_PR_MESSAGE;
+                  await markStale(item, message);
                 }
                 marked++;
               } catch (e) {
