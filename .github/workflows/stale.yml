@@ -187,13 +187,24 @@ jobs:
             }
 
             // true when the PR has merge conflicts, false when it is
-            // mergeable, null when unknown: GitHub computes mergeability
-            // lazily and `mergeable` stays null until it has, and a failed
-            // lookup is treated the same way. `dirty` is the only state that
-            // means conflicts; `behind`, `blocked` and `unstable` do not.
+            // mergeable, null when unknown. GitHub computes mergeability
+            // lazily: the first pulls.get after the base branch moved
+            // returns `mergeable: null` and starts the merge test, so a null
+            // is fetched again after a short wait, a couple of times, before
+            // giving up; a failed lookup is unknown too. `dirty` is the only
+            // state that means conflicts; `behind`, `blocked` and `unstable`
+            // do not.
+            const MERGEABILITY_RETRIES = 2;
+            const MERGEABILITY_RETRY_MS = 3000;
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
             async function hasMergeConflicts(item) {
               try {
-                const pull = await getPull(item);
+                let pull = await getPull(item);
+                for (let i = 0; i < MERGEABILITY_RETRIES && pull.mergeable === null; i++) {
+                  await sleep(MERGEABILITY_RETRY_MS);
+                  pulls.delete(item.number);
+                  pull = await getPull(item);
+                }
                 if (pull.mergeable === null) return null;
                 return pull.mergeable === false && pull.mergeable_state === 'dirty';
               } catch (e) {
