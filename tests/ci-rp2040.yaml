@@ -1,0 +1,19 @@
+esphome:
+  name: ci-rp2040
+  friendly_name: CI RP2040
+  project:
+    name: esphome.workflows-ci
+    version: dev
+
+rp2040:
+  board: rpipicow
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ap: {}
