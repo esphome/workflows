@@ -144,8 +144,9 @@ jobs:
             fi
           done
 
-          if [ ! -f "files/ci-rp2040/$version/ci-rp2040.uf2" ]; then
-            echo "::error::Missing files/ci-rp2040/$version/ci-rp2040.uf2"
+          uf2s=("files/ci-rp2040/$version/"*.uf2)
+          if [ "${#uf2s[@]}" -eq 0 ]; then
+            echo "::error::No .uf2 image in files/ci-rp2040/$version/"
             fail=1
           fi
 
@@ -220,11 +221,19 @@ jobs:
 
           # The expected list above shares the upload step's extension glob,
           # so also pin the .uf2 assets explicitly in case both drop them.
-          for asset in ci-rp2040.uf2 ci-rp2040.uf2.md5 ci-rp2040.uf2.sha256; do
-            if ! grep -qxF "$asset" <<< "$actual"; then
-              echo "::error::Draft release is missing $asset."
-              exit 1
-            fi
+          uf2s=(files/ci-rp2040/"$VERSION"/*.uf2)
+          if [ "${#uf2s[@]}" -eq 0 ]; then
+            echo "::error::No .uf2 image in files/ci-rp2040/$VERSION/"
+            exit 1
+          fi
+          for uf2 in "${uf2s[@]}"; do
+            b=$(basename "$uf2")
+            for asset in "$b" "$b.md5" "$b.sha256"; do
+              if ! grep -qxF "$asset" <<< "$actual"; then
+                echo "::error::Draft release is missing $asset."
+                exit 1
+              fi
+            done
           done
 
   cleanup-gh-release:
