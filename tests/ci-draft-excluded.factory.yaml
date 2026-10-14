@@ -1,0 +1,23 @@
+esphome:
+  name: ci-draft-excluded
+  friendly_name: CI Draft Excluded
+  project:
+    name: esphome.workflows-ci
+    version: dev
+
+esp8266:
+  board: esp01_1m
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+improv_serial:
+
+wifi:
+  ap: {}
+
+captive_portal:
