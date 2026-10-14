@@ -56,6 +56,15 @@ jobs:
       combined-name: ci-combined-single
       release-version: ci-${{ github.run_id }}
 
+  # RP2040 builds ship a .uf2 image instead of a .factory.bin, so this covers
+  # the non-.bin firmware path through the upload workflows.
+  build-rp2040:
+    name: Build (RP2040 uf2)
+    uses: ./.github/workflows/build.yml
+    with:
+      files: tests/ci-rp2040.yaml
+      release-version: ci-${{ github.run_id }}
+
   verify-artifacts:
     name: Verify artifact layout
     runs-on: ubuntu-latest
@@ -63,6 +72,7 @@ jobs:
       - build-single
       - build-combined
       - build-combined-single
+      - build-rp2040
     steps:
       - name: Download all artifacts (as the upload workflows do)
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -85,7 +95,7 @@ jobs:
           version="ci-${{ github.run_id }}"
           fail=0
 
-          for name in ci-single ci-combined ci-combined-single; do
+          for name in ci-single ci-combined ci-combined-single ci-rp2040; do
             if [ ! -f "files/$name/$version/manifest.json" ]; then
               echo "::error::Missing files/$name/$version/manifest.json"
               fail=1
@@ -94,7 +104,7 @@ jobs:
 
           for entry in files/*; do
             case "$(basename "$entry")" in
-              ci-single|ci-combined|ci-combined-single) ;;
+              ci-single|ci-combined|ci-combined-single|ci-rp2040) ;;
               *)
                 echo "::error::Unexpected top-level entry: $entry"
                 fail=1
@@ -126,13 +136,19 @@ jobs:
           fi
 
           shopt -s nullglob
-          for name in ci-single ci-combined ci-combined-single; do
+          for name in ci-single ci-combined ci-combined-single ci-rp2040; do
             bins=("files/$name/$version/"*.bin)
             if [ "${#bins[@]}" -eq 0 ]; then
               echo "::error::No firmware binaries in files/$name/$version/"
               fail=1
             fi
           done
+
+          uf2s=("files/ci-rp2040/$version/"*.uf2)
+          if [ "${#uf2s[@]}" -eq 0 ]; then
+            echo "::error::No .uf2 image in files/ci-rp2040/$version/"
+            fail=1
+          fi
 
           exit $fail
 
@@ -145,6 +161,7 @@ jobs:
       - build-single
       - build-combined
       - build-combined-single
+      - build-rp2040
     permissions:
       contents: write
     uses: ./.github/workflows/upload-to-gh-release.yml
@@ -178,7 +195,7 @@ jobs:
           for device_dir in files/*; do
             device=$(basename "$device_dir")
             echo "$device.manifest.json" >> "$expected"
-            for bin in "$device_dir/$VERSION/"*.{bin,elf}; do
+            for bin in "$device_dir/$VERSION/"*.{bin,elf,uf2}; do
               b=$(basename "$bin")
               printf '%s\n%s.md5\n%s.sha256\n' "$b" "$b" "$b" >> "$expected"
             done
@@ -201,6 +218,23 @@ jobs:
             echo "::error::Draft release assets do not match the artifacts."
             exit 1
           fi
+
+          # The expected list above shares the upload step's extension glob,
+          # so also pin the .uf2 assets explicitly in case both drop them.
+          uf2s=(files/ci-rp2040/"$VERSION"/*.uf2)
+          if [ "${#uf2s[@]}" -eq 0 ]; then
+            echo "::error::No .uf2 image in files/ci-rp2040/$VERSION/"
+            exit 1
+          fi
+          for uf2 in "${uf2s[@]}"; do
+            b=$(basename "$uf2")
+            for asset in "$b" "$b.md5" "$b.sha256"; do
+              if ! grep -qxF "$asset" <<< "$actual"; then
+                echo "::error::Draft release is missing $asset."
+                exit 1
+              fi
+            done
+          done
 
   cleanup-gh-release:
     name: Delete draft release
