@@ -33,8 +33,14 @@ jobs:
     uses: ./.github/workflows/build-to-draft-release.yml
     with:
       # No files input: exercises the *.factory.yaml auto-discovery, which
-      # finds tests/ci-draft.factory.yaml (the only factory config here).
+      # finds both tests/ci-draft.factory.yaml and
+      # tests/ci-draft-excluded.factory.yaml. exclude-files then has to drop
+      # the latter, and verify-artifacts below fails if it was built anyway.
+      # The pattern deliberately omits the tests/ directory: matching it
+      # against the full path proves * spans /, which is what lets consumers
+      # exclude device/device.minimal.factory.yaml without listing any path.
       esphome-version: latest
+      exclude-files: "*-excluded.factory.yaml"
 
   # A repository publishing several combined manifests from one release (the
   # esphome/firmware shape) makes a single call with `groups`. Proves the
@@ -115,6 +121,15 @@ jobs:
               fail=1
             fi
           done
+
+          # tests/ci-draft-excluded.factory.yaml is discovered by the
+          # ungrouped call but must be dropped by its exclude-files pattern.
+          # The catch-all below would also flag it; this names it so the
+          # failure is unambiguous.
+          if [ -e "files/ci-draft-excluded" ]; then
+            echo "::error::exclude-files did not work: ci-draft-excluded was built"
+            fail=1
+          fi
 
           for entry in files/*; do
             case "$(basename "$entry")" in

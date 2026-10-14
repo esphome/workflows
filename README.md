@@ -97,6 +97,29 @@ single-group form; inside `groups` it would sweep one group's configs into
 another. `groups` is therefore mutually exclusive with `files` and
 `combined-name`.
 
+### Excluding files from discovery
+
+`exclude-files` drops matching files from the build after `files` or
+auto-discovery has settled, so a repository can keep discovering every
+`*.factory.yaml` while skipping a config it builds separately. Patterns are
+globs matched against the whole repository-relative path, and `*` spans `/`:
+
+```yaml
+jobs:
+  build:
+    uses: esphome/workflows/.github/workflows/build-to-draft-release.yml@<ref>
+    permissions:
+      contents: write
+    with:
+      esphome-version: 2026.5.3
+      # Discover every *.factory.yaml except the minimal variant, which is
+      # built on its own elsewhere. No need to list the kept configs.
+      exclude-files: "*.minimal.factory.yaml"
+```
+
+`exclude-files` is mutually exclusive with `groups`, which already lists each
+group's files explicitly.
+
 ### Draft asset lifecycle
 
 `build-to-draft-release.yml` never deletes the draft's assets; it only adds
@@ -125,9 +148,11 @@ The R2 workflows are not run end-to-end (they need Cloudflare secrets), but
 they consume artifacts the same way the verified workflows do.
 
 `ci-draft-release.yml` smoke-tests `build-to-draft-release.yml`: factory
-config auto-discovery plus the nested `build.yml` call, and a `groups` call
-that checks each group produces its own combined manifest without absorbing
-another group's builds. The draft-release jobs themselves are not exercised
+config auto-discovery (with an `exclude-files` pattern that must drop one of
+the two discovered configs) plus the nested `build.yml` call, and a `groups`
+call that checks each group produces its own combined manifest without
+absorbing another group's builds. The draft-release jobs themselves are not
+exercised
 in CI: they only run for `workflow_run` events in consumer repositories and
 need a live draft release. The same goes
 for `draft-calver-release.yml`, `publish-draft-release.yml` and

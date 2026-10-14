@@ -30,8 +30,8 @@ on:
       files:
         description: >-
           Newline separated list of files to build. Leave empty to build
-          every *.factory.yaml in the calling repository. Mutually exclusive
-          with `groups`.
+          every *.factory.yaml in the calling repository. `exclude-files` is
+          applied to the result either way. Mutually exclusive with `groups`.
         required: false
         type: string
         default: ""
@@ -41,6 +41,19 @@ on:
           this name. Leave empty to publish one manifest per file. Mutually
           exclusive with `groups`; use `groups` to publish more than one
           combined manifest from the same release.
+        required: false
+        type: string
+        default: ""
+      exclude-files:
+        description: >-
+          Newline separated list of glob patterns. Any file whose
+          repository-relative path matches one is dropped from the build,
+          whether the list came from `files` or from auto-discovery. Patterns
+          are matched against the whole path and * spans /, so
+          *.minimal.factory.yaml excludes
+          device/device.minimal.factory.yaml without naming the directory.
+          Mutually exclusive with `groups`, which lists each group's files
+          explicitly.
         required: false
         type: string
         default: ""
@@ -83,6 +96,7 @@ jobs:
         env:
           INPUT_FILES: ${{ inputs.files }}
           INPUT_COMBINED_NAME: ${{ inputs.combined-name }}
+          INPUT_EXCLUDE_FILES: ${{ inputs.exclude-files }}
           INPUT_GROUPS: ${{ inputs.groups }}
         run: |
           set -euo pipefail
@@ -92,8 +106,8 @@ jobs:
           # not combine" and publishes one manifest per file, which is the
           # behaviour callers that pass neither input have always had.
           if [[ -n "${INPUT_GROUPS}" ]]; then
-            if [[ -n "${INPUT_FILES}" || -n "${INPUT_COMBINED_NAME}" ]]; then
-              echo "::error::groups cannot be combined with files or combined-name"
+            if [[ -n "${INPUT_FILES}" || -n "${INPUT_COMBINED_NAME}" || -n "${INPUT_EXCLUDE_FILES}" ]]; then
+              echo "::error::groups cannot be combined with files, combined-name or exclude-files"
               exit 1
             fi
             if ! groups=$(jq -ce . <<< "${INPUT_GROUPS}"); then
@@ -143,6 +157,43 @@ jobs:
             if [[ -z "${files}" ]]; then
               echo "::error::No *.factory.yaml files found"
               exit 1
+            fi
+            # exclude-files removes entries from the list settled above, so the
+            # same patterns work whether files came from the caller or from
+            # discovery. Contradicting yourself (listing a file in both inputs)
+            # therefore drops it, and every exclusion is logged.
+            if [[ -n "${INPUT_EXCLUDE_FILES}" ]]; then
+              mapfile -t patterns <<< "${INPUT_EXCLUDE_FILES}"
+              kept=()
+              while IFS= read -r file; do
+                if [[ -z "${file}" ]]; then
+                  continue
+                fi
+                for pattern in "${patterns[@]}"; do
+                  if [[ -z "${pattern}" ]]; then
+                    continue
+                  fi
+                  # Unquoted right-hand side on purpose: [[ == ]] then treats
+                  # the pattern as a glob rather than a literal, and its *
+                  # spans /, so a caller can drop
+                  # device/device.minimal.factory.yaml with a bare
+                  # *.minimal.factory.yaml instead of listing every path.
+                  # shellcheck disable=SC2053
+                  if [[ "${file}" == ${pattern} ]]; then
+                    echo "Excluding ${file} (matched ${pattern})"
+                    continue 2
+                  fi
+                done
+                kept+=("${file}")
+              done <<< "${files}"
+              files=""
+              if [[ "${#kept[@]}" -gt 0 ]]; then
+                files=$(printf '%s\n' "${kept[@]}")
+              fi
+              if [[ -z "${files}" ]]; then
+                echo "::error::Every file was excluded by exclude-files; nothing left to build"
+                exit 1
+              fi
             fi
             groups=$(jq -cn --arg name "${INPUT_COMBINED_NAME}" --arg files "${files}" \
               '[{name: $name, files: $files}]')
