@@ -29,12 +29,25 @@ jobs:
 
       - run: tree
 
+      # R2 is S3-compatible and the AWS CLI is preinstalled on the runner, so
+      # this needs no third-party action.
       - name: Upload files to R2
-        uses: ryand56/r2-upload-action@33ebb7a494b3a8a3c5ed2ea6bbdc72e707090317 # v1.5
-        with:
-          r2-account-id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
-          r2-bucket: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
-          source-dir: files
-          destination-dir: ${{ inputs.directory }}/
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          # Required by the SDK but unused by R2.
+          AWS_DEFAULT_REGION: auto
+          # AWS CLI >= 2.23 adds trailing CRC32 checksums to every upload,
+          # which R2 has intermittently rejected. Restore the older behaviour
+          # of only sending a checksum when the operation requires one.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          DIRECTORY: ${{ inputs.directory }}
+          SOURCE_DIR: files
+        run: |
+          set -euo pipefail
+          aws s3 cp "${SOURCE_DIR}" "s3://${BUCKET}/${DIRECTORY%/}/" \
+            --endpoint-url "https://${ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --recursive \
+            --no-progress
