@@ -108,6 +108,16 @@ on:
         required: false
         type: string
         default: ''
+      conflicts-only:
+        description: >
+          Only handle merge conflicts: add or remove the conflict label (and its
+          review) and unmark stale PRs that are mergeable again. Skips
+          issues, stale marking, closing and the activity checks, so it is
+          cheap enough to run several times a day alongside a daily full run.
+          Requires days-before-stale-conflicting to be set
+        required: false
+        type: boolean
+        default: false
       dry-run:
         description: Log what would happen without labeling, commenting or closing
         required: false
@@ -140,422 +150,41 @@ jobs:
           client-id: ${{ vars.ESPHOME_GITHUB_APP_CLIENT_ID }}
           private-key: ${{ secrets.ESPHOME_GITHUB_APP_PRIVATE_KEY }}
           # Scope the minted App token to the minimum the script below needs.
-          permission-contents: read        # repos.getCommit for the PR head commit date
+          permission-contents: read        # repos.getCommit for the PR head commit date (REST fallback)
           permission-issues: write         # list/create comments, add/remove labels, close issues
-          permission-pull-requests: write  # pulls.get, list/create/dismiss reviews and closing pull requests
+          permission-pull-requests: write  # GraphQL PR reads, pulls.get, reviews and closing PRs
+
+      # The script lives in this repository, not the caller's, so check it
+      # out at the exact commit the caller pinned this workflow to
+      - name: Check out the stale script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .esphome-workflows
+          sparse-checkout: scripts/stale
+          persist-credentials: false
 
       - name: Process stale issues and PRs
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           github-token: ${{ steps.generate-token.outputs.token }}
           script: |
-            const DAYS_BEFORE_STALE = ${{ inputs.days-before-stale }};
-            const DAYS_BEFORE_STALE_CONFLICTING = ${{ inputs.days-before-stale-conflicting }};
-            const DAYS_BEFORE_CLOSE = ${{ inputs.days-before-close }};
-            const STALE_LABEL = "${{ inputs.stale-label }}";
-            const EXEMPT_LABEL = "${{ inputs.exempt-label }}";
-            const CONFLICT_LABEL = "${{ inputs.conflict-label }}";
-            const STALE_PR_MESSAGE = process.env.STALE_PR_MESSAGE;
-            const CONFLICT_PR_MESSAGE = process.env.CONFLICT_PR_MESSAGE;
-            const STALE_CONFLICTING_PR_MESSAGE = process.env.STALE_CONFLICTING_PR_MESSAGE;
-            const STALE_ISSUE_MESSAGE = process.env.STALE_ISSUE_MESSAGE;
-            const IGNORED_USERS = new Set("${{ inputs.ignored-users }}".split(',').map(s => s.trim()).filter(Boolean));
-            const DRY_RUN = ${{ inputs.dry-run }};
-            // The App's own login, to find the conflict reviews it submitted
-            const BOT_LOGIN = "${{ steps.generate-token.outputs.app-slug }}[bot]";
-
-            const now = new Date();
-            const staleCutoff = new Date(now.getTime() - DAYS_BEFORE_STALE * 24 * 60 * 60 * 1000);
-            const closeCutoff = new Date(now.getTime() - DAYS_BEFORE_CLOSE * 24 * 60 * 60 * 1000);
-            const conflictCutoff = DAYS_BEFORE_STALE_CONFLICTING > 0
-              ? new Date(now.getTime() - DAYS_BEFORE_STALE_CONFLICTING * 24 * 60 * 60 * 1000)
-              : null;
-
-            console.log(`Will mark items without real activity since: ${staleCutoff.toISOString()}`);
-            if (conflictCutoff) {
-              console.log(`Will mark PRs labelled for merge conflicts before: ${conflictCutoff.toISOString()}`);
-            }
-            console.log(`Will close items marked stale before: ${closeCutoff.toISOString()}`);
-
-            // One pulls.get per PR per run, shared by the conflict check and
-            // the head-commit lookup below
-            const pulls = new Map();
-            async function getPull(item) {
-              if (!pulls.has(item.number)) {
-                const {data} = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: item.number,
-                });
-                pulls.set(item.number, data);
-              }
-              return pulls.get(item.number);
-            }
-
-            // true when the PR has merge conflicts, false when it is
-            // mergeable, null when unknown (not computed yet, or the lookup
-            // failed). `dirty` is the only state that means conflicts;
-            // `behind`, `blocked` and `unstable` do not.
-            async function hasMergeConflicts(item) {
-              try {
-                const pull = await getPull(item);
-                if (pull.mergeable === null) return null;
-                return pull.mergeable === false && pull.mergeable_state === 'dirty';
-              } catch (e) {
-                console.error(`Conflict check failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
-                return null;
-              }
-            }
-
-            // GitHub computes mergeability lazily: the first pulls.get after
-            // the base branch moved returns `mergeable: null` and only starts
-            // the merge test. Fetch every PR up front so the tests run in
-            // parallel, then wait once and fetch the undecided ones again,
-            // rather than sleeping inside the loop one PR at a time.
-            const MERGEABILITY_RETRIES = 2;
-            const MERGEABILITY_RETRY_MS = 5000;
-            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-            async function warmMergeability(items) {
-              let pending = [];
-              for (const item of items) {
-                try {
-                  if ((await getPull(item)).mergeable === null) pending.push(item);
-                } catch (e) {
-                  console.error(`Pull lookup failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
-                }
-              }
-              for (let i = 0; i < MERGEABILITY_RETRIES && pending.length > 0; i++) {
-                console.log(`Waiting for GitHub to compute mergeability of ${pending.length} PRs`);
-                await sleep(MERGEABILITY_RETRY_MS);
-                const still = [];
-                for (const item of pending) {
-                  pulls.delete(item.number);
-                  try {
-                    if ((await getPull(item)).mergeable === null) still.push(item);
-                  } catch (e) {
-                    console.error(`Pull lookup failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
-                  }
-                }
-                pending = still;
-              }
-            }
-
-            async function removeLabel(item, name) {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: item.number,
-                name,
-              });
-            }
-
-            // The GitHub updated_at timestamp moves on events that are not
-            // real activity: bots editing their comments in place, label
-            // changes and similar housekeeping. Real activity is therefore
-            // measured directly: comments *created* by users, and for PRs
-            // also commits and review submissions. Since every kind of real
-            // activity also bumps updated_at, the timestamp is an upper
-            // bound: an item whose updated_at is old is conclusively
-            // inactive, and only apparently-fresh items need verification.
-            async function hasRealActivitySince(item, since) {
-              // Note: the `since` filter of listComments matches the comment
-              // updated_at, so an edited old comment reappears here; compare
-              // created_at to only count genuinely new comments.
-              const comments = await github.paginate(github.rest.issues.listComments, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: item.number,
-                since: since.toISOString(),
-                per_page: 100,
-              });
-              const isRealUser = u => u?.type === 'User' && !IGNORED_USERS.has(u.login);
-              if (comments.some(c => isRealUser(c.user) && new Date(c.created_at) >= since)) {
-                return true;
-              }
-
-              if ('pull_request' in item) {
-                // The head SHA of a fork PR is reachable through the base
-                // repository (GitHub keeps refs/pull/N/head there), so the
-                // base-repo commit API is correct for fork PRs too. Isolated
-                // so an unexpected lookup failure falls through to the review
-                // check instead of skipping the whole item
-                try {
-                  const pull = await getPull(item);
-                  const {data: head} = await github.rest.repos.getCommit({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    ref: pull.head.sha,
-                  });
-                  const lastCommitDate = head.commit?.committer?.date ?? head.commit?.author?.date;
-                  if (lastCommitDate && new Date(lastCommitDate) >= since) {
-                    return true;
-                  }
-                } catch (e) {
-                  console.error(`Commit check failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
-                }
-
-                const reviews = await github.paginate(github.rest.pulls.listReviews, {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: item.number,
-                  per_page: 100,
-                });
-                if (reviews.some(r => isRealUser(r.user) && r.submitted_at && new Date(r.submitted_at) >= since)) {
-                  return true;
-                }
-              }
-
-              return false;
-            }
-
-            async function labelDate(item, name) {
-              const events = await github.paginate(github.rest.issues.listEvents, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: item.number,
-                per_page: 100,
-              });
-              const labelings = events.filter(e => e.event === 'labeled' && e.label?.name === name);
-              const last = labelings[labelings.length - 1];
-              return last ? new Date(last.created_at) : null;
-            }
-
-            async function markStale(item, body) {
-              // Comment before labeling: if the comment fails the item is
-              // retried next run, instead of a labeled-but-unwarned item
-              // being closed later without explanation
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: item.number,
-                body,
-              });
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: item.number,
-                labels: [STALE_LABEL],
-              });
-            }
-
-            // A request-changes review, so a conflicting PR shows as blocked
-            // in the PR list. GitHub refuses one on the App's own PRs, so
-            // those get a plain comment instead.
-            async function requestConflictChanges(item) {
-              if (item.user?.login === BOT_LOGIN) {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: item.number,
-                  body: CONFLICT_PR_MESSAGE,
-                });
-                return;
-              }
-              await github.rest.pulls.createReview({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: item.number,
-                event: 'REQUEST_CHANGES',
-                body: CONFLICT_PR_MESSAGE,
-              });
-            }
-
-            // Dismiss the reviews requestConflictChanges submitted, so a PR
-            // is not left blocked once it is mergeable. Called before the
-            // conflict label is removed: if a dismissal fails the PR keeps
-            // the label and is retried next run, rather than keeping the
-            // review forever.
-            async function dismissConflictReviews(item) {
-              const reviews = await github.paginate(github.rest.pulls.listReviews, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: item.number,
-                per_page: 100,
-              });
-              for (const review of reviews) {
-                if (review.user?.login !== BOT_LOGIN || review.state !== 'CHANGES_REQUESTED') continue;
-                await github.rest.pulls.dismissReview({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: item.number,
-                  review_id: review.id,
-                  message: 'The merge conflicts have been resolved.',
-                });
-              }
-            }
-
-            const openItems = await github.paginate(github.rest.issues.listForRepo, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              per_page: 100,
-            });
-            console.log(`Processing ${openItems.length} open items`);
-            if (conflictCutoff) {
-              await warmMergeability(openItems.filter(item => 'pull_request' in item && !item.locked));
-            }
-
-            let marked = 0, unmarked = 0, closed = 0, conflicts = 0, resolved = 0, unknown = 0;
-
-            for (const item of openItems) {
-              if (item.locked) continue;
-              const labels = item.labels.map(l => l.name);
-              if (labels.includes(EXEMPT_LABEL)) continue;
-
-              const isPr = 'pull_request' in item;
-              const updatedAt = new Date(item.updated_at);
-              const createdAt = new Date(item.created_at);
-
-              try {
-                if (labels.includes(STALE_LABEL)) {
-                  // Already stale: real activity unmarks, silence closes
-                  const labeledAt = await labelDate(item, STALE_LABEL);
-                  if (!labeledAt) {
-                    console.warn(`No ${STALE_LABEL} labeling event found for #${item.number}; skipping`);
-                    continue;
-                  }
-
-                  // Stale with the conflict label: a comment does not keep
-                  // it open, only resolving the conflicts does, and doing so
-                  // clears both labels as the conflict comment promised.
-                  let rescued = true;
-                  if (isPr && conflictCutoff && labels.includes(CONFLICT_LABEL)) {
-                    const conflicting = await hasMergeConflicts(item);
-                    if (conflicting === null) {
-                      console.log(`Skipping PR #${item.number}: mergeability not known yet`);
-                      unknown++;
-                      continue;
-                    }
-                    if (conflicting) {
-                      rescued = false;
-                    } else {
-                      console.log(`Unmarking PR #${item.number}: mergeable again`);
-                      if (!DRY_RUN) {
-                        await dismissConflictReviews(item);
-                        await removeLabel(item, CONFLICT_LABEL);
-                        await removeLabel(item, STALE_LABEL);
-                      }
-                      resolved++;
-                      unmarked++;
-                      continue;
-                    }
-                  }
-
-                  // Measure from whichever is later, so activity that is
-                  // itself older than the stale window cannot clear the label
-                  // on an item that was marked long ago.
-                  const since = labeledAt > staleCutoff ? labeledAt : staleCutoff;
-                  if (rescued && await hasRealActivitySince(item, since)) {
-                    const kind = isPr ? 'PR' : 'issue';
-                    console.log(`Unmarking ${kind} #${item.number}: real activity since it was marked stale`);
-                    if (!DRY_RUN) {
-                      await removeLabel(item, STALE_LABEL);
-                    }
-                    unmarked++;
-                  } else if (labeledAt < closeCutoff) {
-                    const kind = isPr ? 'PR' : 'issue';
-                    const reason = rescued ? 'no real activity' : 'merge conflicts unresolved';
-                    console.log(`Closing ${kind} #${item.number}: ` +
-                      `${reason} since stale on ${labeledAt.toISOString()}`);
-                    if (!DRY_RUN) {
-                      const update = {
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: item.number,
-                        state: 'closed',
-                      };
-                      // Issues support a close reason; PRs do not
-                      if (!isPr) {
-                        update.state_reason = 'not_planned';
-                      }
-                      await github.rest.issues.update(update);
-                    }
-                    closed++;
-                  }
-                  continue;
-                }
-
-                // Not stale yet. Merge conflicts are handled first: a PR
-                // is labelled and told the moment they appear, and marked
-                // stale once the label is old enough with the conflicts
-                // still unresolved, whatever else happened on it meanwhile.
-                // A conflict still inside its window falls through to the
-                // inactivity check like any other PR.
-                let labelled = isPr && labels.includes(CONFLICT_LABEL);
-                if (isPr && conflictCutoff) {
-                  const conflicting = await hasMergeConflicts(item);
-                  if (conflicting === null) {
-                    console.log(`PR #${item.number}: mergeability not known yet`);
-                    unknown++;
-                  }
-                  if (conflicting === true && !labelled) {
-                    console.log(`Labelling PR #${item.number} for merge conflicts`);
-                    if (!DRY_RUN) {
-                      // Review before labeling, so a failed review is
-                      // retried next run
-                      await requestConflictChanges(item);
-                      await github.rest.issues.addLabels({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: item.number,
-                        labels: [CONFLICT_LABEL],
-                      });
-                    }
-                    conflicts++;
-                    continue;
-                  }
-                  if (conflicting === false && labelled) {
-                    console.log(`PR #${item.number} is mergeable again; removing ${CONFLICT_LABEL}`);
-                    if (!DRY_RUN) {
-                      await dismissConflictReviews(item);
-                      await removeLabel(item, CONFLICT_LABEL);
-                    }
-                    resolved++;
-                    labelled = false;
-                  }
-                  if (conflicting === true && labelled) {
-                    const conflictLabeledAt = await labelDate(item, CONFLICT_LABEL);
-                    if (conflictLabeledAt && conflictLabeledAt < conflictCutoff) {
-                      console.log(`Marking PR #${item.number} as stale: ` +
-                        `merge conflicts unresolved since ${conflictLabeledAt.toISOString()}`);
-                      if (!DRY_RUN) {
-                        await markStale(item, STALE_CONFLICTING_PR_MESSAGE);
-                      }
-                      marked++;
-                      continue;
-                    }
-                  }
-                }
-
-                // An old updated_at is conclusive; a fresh one may be a
-                // phantom update and needs verification, but only for items
-                // old enough to possibly be inactive.
-                if (updatedAt >= staleCutoff && createdAt >= staleCutoff) continue;
-                if (updatedAt >= staleCutoff && await hasRealActivitySince(item, staleCutoff)) continue;
-
-                // A PR carrying the conflict label is told so, since a
-                // comment will not keep it open once it is stale
-                const kind = isPr ? 'PR' : 'issue';
-                console.log(`Marking ${kind} #${item.number} as stale: ` +
-                  `no real activity since ${staleCutoff.toISOString()} (updated_at ${item.updated_at})`);
-                if (!DRY_RUN) {
-                  const message = !isPr ? STALE_ISSUE_MESSAGE
-                    : conflictCutoff && labelled ? STALE_CONFLICTING_PR_MESSAGE
-                    : STALE_PR_MESSAGE;
-                  await markStale(item, message);
-                }
-                marked++;
-              } catch (e) {
-                console.error(`Failed to process #${item.number}: ${e instanceof Error ? e.message : e}`);
-              }
-            }
-
-            console.log(`Done${DRY_RUN ? ' (dry run)' : ''}: ` +
-              `${marked} marked, ${unmarked} unmarked, ${closed} closed, ` +
-              `${conflicts} labelled for merge conflicts, ${resolved} conflicts resolved, ` +
-              `${unknown} with mergeability not known yet`);
+            const run = require(`${process.env.GITHUB_WORKSPACE}/.esphome-workflows/scripts/stale/index.js`);
+            await run({github, context, core});
         env:
+          STALE_DAYS_BEFORE_STALE: ${{ inputs.days-before-stale }}
+          STALE_DAYS_BEFORE_STALE_CONFLICTING: ${{ inputs.days-before-stale-conflicting }}
+          STALE_DAYS_BEFORE_CLOSE: ${{ inputs.days-before-close }}
+          STALE_LABEL: ${{ inputs.stale-label }}
+          STALE_EXEMPT_LABEL: ${{ inputs.exempt-label }}
+          STALE_CONFLICT_LABEL: ${{ inputs.conflict-label }}
+          STALE_IGNORED_USERS: ${{ inputs.ignored-users }}
+          STALE_CONFLICTS_ONLY: ${{ inputs.conflicts-only }}
+          STALE_DRY_RUN: ${{ inputs.dry-run }}
+          # The App's own login, to find the conflict reviews it submitted
+          STALE_BOT_LOGIN: ${{ steps.generate-token.outputs.app-slug }}[bot]
           STALE_PR_MESSAGE: ${{ inputs.stale-pr-message }}
-          CONFLICT_PR_MESSAGE: ${{ inputs.conflict-pr-message }}
+          STALE_CONFLICT_PR_MESSAGE: ${{ inputs.conflict-pr-message }}
           STALE_CONFLICTING_PR_MESSAGE: ${{ inputs.stale-conflicting-pr-message }}
           STALE_ISSUE_MESSAGE: ${{ inputs.stale-issue-message }}
