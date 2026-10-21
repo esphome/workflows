@@ -108,6 +108,16 @@ on:
         required: false
         type: string
         default: ''
+      conflicts-only:
+        description: >
+          Only handle merge conflicts: add or remove the conflict label (and its
+          review) and unmark stale PRs that are mergeable again. Skips
+          issues, stale marking, closing and the activity checks, so it is
+          cheap enough to run several times a day alongside a daily full run.
+          Requires days-before-stale-conflicting to be set
+        required: false
+        type: boolean
+        default: false
       dry-run:
         description: Log what would happen without labeling, commenting or closing
         required: false
@@ -140,9 +150,9 @@ jobs:
           client-id: ${{ vars.ESPHOME_GITHUB_APP_CLIENT_ID }}
           private-key: ${{ secrets.ESPHOME_GITHUB_APP_PRIVATE_KEY }}
           # Scope the minted App token to the minimum the script below needs.
-          permission-contents: read        # repos.getCommit for the PR head commit date
+          permission-contents: read        # repos.getCommit for the PR head commit date (REST fallback)
           permission-issues: write         # list/create comments, add/remove labels, close issues
-          permission-pull-requests: write  # pulls.get, list/create/dismiss reviews and closing pull requests
+          permission-pull-requests: write  # GraphQL PR reads, pulls.get, reviews and closing PRs
 
       - name: Process stale issues and PRs
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
@@ -160,6 +170,7 @@ jobs:
             const STALE_CONFLICTING_PR_MESSAGE = process.env.STALE_CONFLICTING_PR_MESSAGE;
             const STALE_ISSUE_MESSAGE = process.env.STALE_ISSUE_MESSAGE;
             const IGNORED_USERS = new Set("${{ inputs.ignored-users }}".split(',').map(s => s.trim()).filter(Boolean));
+            const CONFLICTS_ONLY = ${{ inputs.conflicts-only }};
             const DRY_RUN = ${{ inputs.dry-run }};
             // The App's own login, to find the conflict reviews it submitted
             const BOT_LOGIN = "${{ steps.generate-token.outputs.app-slug }}[bot]";
@@ -171,14 +182,25 @@ jobs:
               ? new Date(now.getTime() - DAYS_BEFORE_STALE_CONFLICTING * 24 * 60 * 60 * 1000)
               : null;
 
-            console.log(`Will mark items without real activity since: ${staleCutoff.toISOString()}`);
-            if (conflictCutoff) {
-              console.log(`Will mark PRs labelled for merge conflicts before: ${conflictCutoff.toISOString()}`);
+            if (CONFLICTS_ONLY && !conflictCutoff) {
+              core.setFailed('conflicts-only needs days-before-stale-conflicting to be set');
+              return;
             }
-            console.log(`Will close items marked stale before: ${closeCutoff.toISOString()}`);
 
-            // One pulls.get per PR per run, shared by the conflict check and
-            // the head-commit lookup below
+            if (CONFLICTS_ONLY) {
+              console.log('Conflicts only: labelling PRs with merge conflicts and ' +
+                'unmarking stale ones that are mergeable again');
+            } else {
+              console.log(`Will mark items without real activity since: ${staleCutoff.toISOString()}`);
+              if (conflictCutoff) {
+                console.log(`Will mark PRs labelled for merge conflicts before: ${conflictCutoff.toISOString()}`);
+              }
+              console.log(`Will close items marked stale before: ${closeCutoff.toISOString()}`);
+            }
+
+            // REST fallback: one pulls.get per PR per run, shared by the
+            // conflict check and the head-commit lookup below. Only used for
+            // PRs the GraphQL prefetch below did not cover
             const pulls = new Map();
             async function getPull(item) {
               if (!pulls.has(item.number)) {
@@ -192,11 +214,90 @@ jobs:
               return pulls.get(item.number);
             }
 
+            // Every open PR is read up front with paged GraphQL queries
+            // instead of one REST call per PR: the fields the checks below
+            // need (labels, timestamps, the head commit date for the full
+            // pass and, when conflict handling is on, mergeability) all come
+            // back in the same response. Anything missing from it falls back
+            // to the REST paths. On failure the map stays empty and
+            // everything falls back.
+            //
+            // Pages are kept small because GitHub aborts a GraphQL request
+            // after 10 seconds, and each PR's head commit costs about 40ms of
+            // that. mergeStateStatus is deliberately not requested: at about
+            // 100ms per PR it alone would push a page past the limit, and
+            // `CONFLICTING` already means merge conflicts.
+            const PREFETCH_PAGE = 50;
+            const PREFETCH_ATTEMPTS = 3;
+            const PREFETCH_RETRY_MS = 5000;
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            const prs = new Map();
+            let prefetchFailed = false;
+            async function prefetchPulls() {
+              const query = `
+                query($owner: String!, $repo: String!, $cursor: String,
+                      $withMergeable: Boolean!, $withCommits: Boolean!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequests(states: OPEN, first: ${PREFETCH_PAGE}, after: $cursor) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes {
+                        number locked updatedAt createdAt headRefOid
+                        author { __typename login }
+                        labels(first: 100) { nodes { name } }
+                        commits(last: 1) @include(if: $withCommits) {
+                          nodes { commit { oid committedDate authoredDate } }
+                        }
+                        mergeable @include(if: $withMergeable)
+                      }
+                    }
+                  }
+                }`;
+              // A single page can time out or hit a 502; retry it a few
+              // times before giving up on the prefetch
+              async function page(cursor) {
+                for (let attempt = 1; ; attempt++) {
+                  try {
+                    const data = await github.graphql(query, {
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      cursor,
+                      withMergeable: conflictCutoff !== null,
+                      withCommits: !CONFLICTS_ONLY,
+                    });
+                    return data.repository.pullRequests;
+                  } catch (e) {
+                    if (attempt >= PREFETCH_ATTEMPTS) throw e;
+                    console.log(`GraphQL page failed (attempt ${attempt}), retrying: ` +
+                      `${e instanceof Error ? e.message.split('\n')[0] : e}`);
+                    await sleep(PREFETCH_RETRY_MS);
+                  }
+                }
+              }
+              try {
+                let cursor = null;
+                do {
+                  const result = await page(cursor);
+                  for (const node of result.nodes) prs.set(node.number, node);
+                  cursor = result.pageInfo.hasNextPage ? result.pageInfo.endCursor : null;
+                } while (cursor);
+              } catch (e) {
+                console.error(`GraphQL prefetch failed: ${e instanceof Error ? e.message : e}`);
+                prs.clear();
+                prefetchFailed = true;
+              }
+            }
+
             // true when the PR has merge conflicts, false when it is
             // mergeable, null when unknown (not computed yet, or the lookup
-            // failed). `dirty` is the only state that means conflicts;
-            // `behind`, `blocked` and `unstable` do not.
+            // failed). Over REST `dirty` is the only state that means
+            // conflicts; `behind`, `blocked` and `unstable` do not. GraphQL
+            // reports the same thing as `CONFLICTING`.
             async function hasMergeConflicts(item) {
+              const node = prs.get(item.number);
+              if (node && 'mergeable' in node) {
+                if (node.mergeable === 'UNKNOWN') return null;
+                return node.mergeable === 'CONFLICTING';
+              }
               try {
                 const pull = await getPull(item);
                 if (pull.mergeable === null) return null;
@@ -207,33 +308,52 @@ jobs:
               }
             }
 
-            // GitHub computes mergeability lazily: the first pulls.get after
-            // the base branch moved returns `mergeable: null` and only starts
-            // the merge test. Fetch every PR up front so the tests run in
-            // parallel, then wait once and fetch the undecided ones again,
+            // GitHub computes mergeability lazily: the first query after the
+            // base branch moved returns `UNKNOWN` and only starts the merge
+            // test. The prefetch above has already started every test, so
+            // wait once per round and re-query just the undecided PRs,
             // rather than sleeping inside the loop one PR at a time.
-            const MERGEABILITY_RETRIES = 2;
-            const MERGEABILITY_RETRY_MS = 5000;
-            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-            async function warmMergeability(items) {
-              let pending = [];
-              for (const item of items) {
-                try {
-                  if ((await getPull(item)).mergeable === null) pending.push(item);
-                } catch (e) {
-                  console.error(`Pull lookup failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
-                }
+            const MERGEABILITY_RETRIES = 3;
+            const MERGEABILITY_RETRY_MS = 10000;
+            const MERGEABILITY_CHUNK = 100;
+            async function refreshMergeability(numbers) {
+              const fields = numbers.map(n =>
+                `pr${n}: pullRequest(number: ${n}) { number mergeable }`);
+              const data = await github.graphql(
+                `query($owner: String!, $repo: String!) {
+                  repository(owner: $owner, name: $repo) { ${fields.join('\n')} }
+                }`,
+                {owner: context.repo.owner, repo: context.repo.repo},
+              );
+              const still = [];
+              for (const n of numbers) {
+                const fresh = data.repository[`pr${n}`];
+                // Gone (deleted or transferred): nothing left to wait for
+                if (!fresh) continue;
+                const node = prs.get(n);
+                node.mergeable = fresh.mergeable;
+                if (fresh.mergeable === 'UNKNOWN') still.push(n);
               }
+              return still;
+            }
+            async function waitForMergeability() {
+              let pending = [...prs.values()]
+                .filter(node => node.mergeable === 'UNKNOWN' && !node.locked &&
+                  !node.labels.nodes.some(l => l.name === EXEMPT_LABEL))
+                .map(node => node.number);
               for (let i = 0; i < MERGEABILITY_RETRIES && pending.length > 0; i++) {
                 console.log(`Waiting for GitHub to compute mergeability of ${pending.length} PRs`);
                 await sleep(MERGEABILITY_RETRY_MS);
                 const still = [];
-                for (const item of pending) {
-                  pulls.delete(item.number);
+                for (let j = 0; j < pending.length; j += MERGEABILITY_CHUNK) {
+                  const chunk = pending.slice(j, j + MERGEABILITY_CHUNK);
                   try {
-                    if ((await getPull(item)).mergeable === null) still.push(item);
+                    still.push(...await refreshMergeability(chunk));
                   } catch (e) {
-                    console.error(`Pull lookup failed for #${item.number}: ${e instanceof Error ? e.message : e}`);
+                    console.error(`Mergeability lookup failed for ${chunk.length} PRs: ` +
+                      `${e instanceof Error ? e.message : e}`);
+                    // Keep them pending so a transient error is retried
+                    still.push(...chunk);
                   }
                 }
                 pending = still;
@@ -280,13 +400,22 @@ jobs:
                 // so an unexpected lookup failure falls through to the review
                 // check instead of skipping the whole item
                 try {
-                  const pull = await getPull(item);
-                  const {data: head} = await github.rest.repos.getCommit({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    ref: pull.head.sha,
-                  });
-                  const lastCommitDate = head.commit?.committer?.date ?? head.commit?.author?.date;
+                  // The prefetch already carries the head commit; use it
+                  // only when it is the head the PR points at right now
+                  const node = prs.get(item.number);
+                  const headCommit = node?.commits?.nodes[0]?.commit;
+                  let lastCommitDate;
+                  if (headCommit && headCommit.oid === node.headRefOid) {
+                    lastCommitDate = headCommit.committedDate ?? headCommit.authoredDate;
+                  } else {
+                    const pull = await getPull(item);
+                    const {data: head} = await github.rest.repos.getCommit({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      ref: pull.head.sha,
+                    });
+                    lastCommitDate = head.commit?.committer?.date ?? head.commit?.author?.date;
+                  }
                   if (lastCommitDate && new Date(lastCommitDate) >= since) {
                     return true;
                   }
@@ -384,15 +513,42 @@ jobs:
               }
             }
 
-            const openItems = await github.paginate(github.rest.issues.listForRepo, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              per_page: 100,
-            });
-            console.log(`Processing ${openItems.length} open items`);
+            await prefetchPulls();
             if (conflictCutoff) {
-              await warmMergeability(openItems.filter(item => 'pull_request' in item && !item.locked));
+              await waitForMergeability();
+            }
+
+            let openItems;
+            if (CONFLICTS_ONLY) {
+              if (prefetchFailed) {
+                core.setFailed('conflicts-only needs the GraphQL prefetch, which failed');
+                return;
+              }
+              // Same shape as the REST issue list items, newest number first
+              openItems = [...prs.values()]
+                .map(node => ({
+                  number: node.number,
+                  locked: node.locked,
+                  labels: node.labels.nodes.map(l => ({name: l.name})),
+                  pull_request: {},
+                  // GraphQL drops the [bot] suffix that REST logins carry
+                  user: node.author && {
+                    login: node.author.__typename === 'Bot'
+                      ? `${node.author.login}[bot]` : node.author.login,
+                  },
+                  updated_at: node.updatedAt,
+                  created_at: node.createdAt,
+                }))
+                .sort((a, b) => b.number - a.number);
+              console.log(`Processing ${openItems.length} open PRs (conflicts only)`);
+            } else {
+              openItems = await github.paginate(github.rest.issues.listForRepo, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                per_page: 100,
+              });
+              console.log(`Processing ${openItems.length} open items`);
             }
 
             let marked = 0, unmarked = 0, closed = 0, conflicts = 0, resolved = 0, unknown = 0;
@@ -409,8 +565,9 @@ jobs:
               try {
                 if (labels.includes(STALE_LABEL)) {
                   // Already stale: real activity unmarks, silence closes
-                  const labeledAt = await labelDate(item, STALE_LABEL);
-                  if (!labeledAt) {
+                  // (conflicts-only never looks at the stale age)
+                  const labeledAt = CONFLICTS_ONLY ? null : await labelDate(item, STALE_LABEL);
+                  if (!CONFLICTS_ONLY && !labeledAt) {
                     console.warn(`No ${STALE_LABEL} labeling event found for #${item.number}; skipping`);
                     continue;
                   }
@@ -440,6 +597,8 @@ jobs:
                       continue;
                     }
                   }
+
+                  if (CONFLICTS_ONLY) continue;
 
                   // Measure from whichever is later, so activity that is
                   // itself older than the stale window cannot clear the label
@@ -513,7 +672,7 @@ jobs:
                     resolved++;
                     labelled = false;
                   }
-                  if (conflicting === true && labelled) {
+                  if (conflicting === true && labelled && !CONFLICTS_ONLY) {
                     const conflictLabeledAt = await labelDate(item, CONFLICT_LABEL);
                     if (conflictLabeledAt && conflictLabeledAt < conflictCutoff) {
                       console.log(`Marking PR #${item.number} as stale: ` +
@@ -526,6 +685,8 @@ jobs:
                     }
                   }
                 }
+
+                if (CONFLICTS_ONLY) continue;
 
                 // An old updated_at is conclusive; a fresh one may be a
                 // phantom update and needs verification, but only for items
