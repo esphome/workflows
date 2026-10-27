@@ -39,9 +39,10 @@ on:
         default: not-stale
       conflict-label:
         description: >
-          Label added, with a comment, as soon as a PR has merge conflicts.
-          While it is present, comments do not unmark a stale PR; only
-          resolving the conflicts does. Removed once the PR is mergeable
+          Label added, with a request-changes review, as soon as a PR has
+          merge conflicts. While it is present, comments do not unmark a
+          stale PR; only resolving the conflicts does. Removed, and the
+          review dismissed, once the PR is mergeable
         required: false
         type: string
         default: needs-rebase
@@ -61,7 +62,10 @@ on:
 
           Thank you for your contribution!
       conflict-pr-message:
-        description: Comment posted when a PR is labelled for merge conflicts
+        description: >
+          Body of the request-changes review submitted when a PR is labelled
+          for merge conflicts. The review is dismissed once the PR is
+          mergeable again
         required: false
         type: string
         default: >
@@ -138,7 +142,7 @@ jobs:
           # Scope the minted App token to the minimum the script below needs.
           permission-contents: read        # repos.getCommit for the PR head commit date
           permission-issues: write         # list/create comments, add/remove labels, close issues
-          permission-pull-requests: write  # pulls.get, pulls.listReviews and closing pull requests
+          permission-pull-requests: write  # pulls.get, list/create/dismiss reviews and closing pull requests
 
       - name: Process stale issues and PRs
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
@@ -157,6 +161,8 @@ jobs:
             const STALE_ISSUE_MESSAGE = process.env.STALE_ISSUE_MESSAGE;
             const IGNORED_USERS = new Set("${{ inputs.ignored-users }}".split(',').map(s => s.trim()).filter(Boolean));
             const DRY_RUN = ${{ inputs.dry-run }};
+            // The App's own login, to find the conflict reviews it submitted
+            const BOT_LOGIN = "${{ steps.generate-token.outputs.app-slug }}[bot]";
 
             const now = new Date();
             const staleCutoff = new Date(now.getTime() - DAYS_BEFORE_STALE * 24 * 60 * 60 * 1000);
@@ -332,6 +338,52 @@ jobs:
               });
             }
 
+            // A request-changes review, so a conflicting PR shows as blocked
+            // in the PR list. GitHub refuses one on the App's own PRs, so
+            // those get a plain comment instead.
+            async function requestConflictChanges(item) {
+              if (item.user?.login === BOT_LOGIN) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: item.number,
+                  body: CONFLICT_PR_MESSAGE,
+                });
+                return;
+              }
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: item.number,
+                event: 'REQUEST_CHANGES',
+                body: CONFLICT_PR_MESSAGE,
+              });
+            }
+
+            // Dismiss the reviews requestConflictChanges submitted, so a PR
+            // is not left blocked once it is mergeable. Called before the
+            // conflict label is removed: if a dismissal fails the PR keeps
+            // the label and is retried next run, rather than keeping the
+            // review forever.
+            async function dismissConflictReviews(item) {
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: item.number,
+                per_page: 100,
+              });
+              for (const review of reviews) {
+                if (review.user?.login !== BOT_LOGIN || review.state !== 'CHANGES_REQUESTED') continue;
+                await github.rest.pulls.dismissReview({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: item.number,
+                  review_id: review.id,
+                  message: 'The merge conflicts have been resolved.',
+                });
+              }
+            }
+
             const openItems = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -379,6 +431,7 @@ jobs:
                     } else {
                       console.log(`Unmarking PR #${item.number}: mergeable again`);
                       if (!DRY_RUN) {
+                        await dismissConflictReviews(item);
                         await removeLabel(item, CONFLICT_LABEL);
                         await removeLabel(item, STALE_LABEL);
                       }
@@ -438,12 +491,9 @@ jobs:
                   if (conflicting === true && !labelled) {
                     console.log(`Labelling PR #${item.number} for merge conflicts`);
                     if (!DRY_RUN) {
-                      await github.rest.issues.createComment({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: item.number,
-                        body: CONFLICT_PR_MESSAGE,
-                      });
+                      // Review before labeling, so a failed review is
+                      // retried next run
+                      await requestConflictChanges(item);
                       await github.rest.issues.addLabels({
                         owner: context.repo.owner,
                         repo: context.repo.repo,
@@ -457,6 +507,7 @@ jobs:
                   if (conflicting === false && labelled) {
                     console.log(`PR #${item.number} is mergeable again; removing ${CONFLICT_LABEL}`);
                     if (!DRY_RUN) {
+                      await dismissConflictReviews(item);
                       await removeLabel(item, CONFLICT_LABEL);
                     }
                     resolved++;
