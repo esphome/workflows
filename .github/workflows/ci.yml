@@ -79,14 +79,16 @@ jobs:
       release-version: ci-${{ github.run_id }}
 
   # Two configs sharing esphome.name (hardware revisions) must not collide
-  # when the firmware is named after the YAML file instead.
+  # when the firmware is named after the YAML file instead. The extensions
+  # cover both stems (.factory.yml and plain .yaml) while staying out of
+  # ci-draft-release.yml's *.factory.yaml auto-discovery.
   build-name-from-file:
     name: Build (name from file)
     uses: ./.github/workflows/build.yml
     with:
       files: |
-        tests/ci-revision-a.factory.yaml
-        tests/ci-revision-b.factory.yaml
+        tests/ci-revision-a.factory.yml
+        tests/ci-revision-b.yaml
       name-from-file: true
       release-version: ci-${{ github.run_id }}
 
@@ -95,8 +97,8 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       files: |
-        tests/ci-revision-a.factory.yaml
-        tests/ci-revision-b.factory.yaml
+        tests/ci-revision-a.factory.yml
+        tests/ci-revision-b.yaml
       name-from-file: true
       combined-name: ci-revision-combined
       release-version: ci-${{ github.run_id }}
