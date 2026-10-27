@@ -177,8 +177,9 @@ The R2 workflows are not run end-to-end (they need Cloudflare secrets), but
 they consume artifacts the same way the verified workflows do.
 
 `ci-draft-release.yml` smoke-tests `build-to-draft-release.yml`: factory
-config auto-discovery (with an `exclude-files` pattern that must drop one of
-the two discovered configs) plus the nested `build.yml` call, and a `groups`
+config auto-discovery with `name-from-file` (with an `exclude-files` pattern
+that must drop one of the discovered configs) plus the nested `build.yml` call,
+and a `groups`
 call that checks each group produces its own combined manifest without
 absorbing another group's builds. The draft-release jobs themselves are not
 exercised
