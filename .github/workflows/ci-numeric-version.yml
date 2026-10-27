@@ -1,0 +1,55 @@
+name: CI Numeric Version
+
+# Regression test for a release whose version is purely numeric (e.g. 1.0).
+# build.yml injects the version into the project config with sed; without
+# quoting, `version: 1.0` is parsed by ESPHome as a float and the build
+# fails (esphome/workflows#149). This builds a config with release-version
+# 1.0 so the real sed + build path proves the value stays a string.
+#
+# It lives in its own workflow (not a job in ci.yml) because ci.yml's verify
+# jobs download every artifact of their run and assume one shared version
+# directory; this build's 1.0 version directory would break that accounting.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-numeric:
+    name: Build (numeric version)
+    uses: ./.github/workflows/build.yml
+    with:
+      files: tests/ci-numeric.yaml
+      release-version: "1.0"
+
+  verify-numeric:
+    name: Verify numeric version build
+    runs-on: ubuntu-latest
+    needs:
+      - build-numeric
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: files
+          merge-multiple: true
+
+      - name: Tree
+        run: tree
+
+      - name: Verify layout
+        run: |
+          if [ ! -f "files/ci-numeric/1.0/manifest.json" ]; then
+            echo "::error::Missing files/ci-numeric/1.0/manifest.json"
+            exit 1
+          fi
