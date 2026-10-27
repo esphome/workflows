@@ -78,6 +78,29 @@ jobs:
       files: tests/ci-rp2040.yaml
       release-version: ci-${{ github.run_id }}
 
+  # Two configs sharing esphome.name (hardware revisions) must not collide
+  # when the firmware is named after the YAML file instead.
+  build-name-from-file:
+    name: Build (name from file)
+    uses: ./.github/workflows/build.yml
+    with:
+      files: |
+        tests/ci-revision-a.factory.yaml
+        tests/ci-revision-b.factory.yaml
+      name-from-file: true
+      release-version: ci-${{ github.run_id }}
+
+  build-name-from-file-combined:
+    name: Build (name from file, combined artifact)
+    uses: ./.github/workflows/build.yml
+    with:
+      files: |
+        tests/ci-revision-a.factory.yaml
+        tests/ci-revision-b.factory.yaml
+      name-from-file: true
+      combined-name: ci-revision-combined
+      release-version: ci-${{ github.run_id }}
+
   verify-artifacts:
     name: Verify artifact layout
     runs-on: ubuntu-latest
@@ -86,6 +109,8 @@ jobs:
       - build-combined
       - build-combined-single
       - build-rp2040
+      - build-name-from-file
+      - build-name-from-file-combined
     steps:
       - name: Download all artifacts (as the upload workflows do)
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -107,8 +132,12 @@ jobs:
         run: |
           version="ci-${{ github.run_id }}"
           fail=0
+          expected_names=(
+            ci-single ci-combined ci-combined-single ci-rp2040
+            ci-revision-a ci-revision-b ci-revision-combined
+          )
 
-          for name in ci-single ci-combined ci-combined-single ci-rp2040; do
+          for name in "${expected_names[@]}"; do
             if [ ! -f "files/$name/$version/manifest.json" ]; then
               echo "::error::Missing files/$name/$version/manifest.json"
               fail=1
@@ -118,6 +147,7 @@ jobs:
           for entry in files/*; do
             case "$(basename "$entry")" in
               ci-single|ci-combined|ci-combined-single|ci-rp2040) ;;
+              ci-revision-a|ci-revision-b|ci-revision-combined) ;;
               *)
                 echo "::error::Unexpected top-level entry: $entry"
                 fail=1
@@ -148,8 +178,56 @@ jobs:
             fail=1
           fi
 
+          if ! builds=$(jq '.builds | length' "files/ci-revision-combined/$version/manifest.json"); then
+            echo "::error::Failed to read the ci-revision-combined manifest"
+            fail=1
+          elif [ "$builds" -ne 2 ]; then
+            echo "::error::ci-revision-combined manifest has $builds builds, expected 2"
+            fail=1
+          fi
+
+          # Both revisions share esphome.name, so name-from-file must keep
+          # their firmware files apart, named after the YAML file.
+          for rev in ci-revision-a ci-revision-b; do
+            for ext in factory.bin ota.bin; do
+              if [ ! -f "files/$rev/$version/$rev-esp8266.$ext" ]; then
+                echo "::error::Missing files/$rev/$version/$rev-esp8266.$ext"
+                fail=1
+              fi
+            done
+          done
+
+          # Nothing may keep the esphome.name-based name.
+          leftovers=$(find files -name '*ci-revision-esp8266*')
+          if [ -n "$leftovers" ]; then
+            echo "::error::Files named after esphome.name were produced:"
+            echo "$leftovers"
+            fail=1
+          fi
+
+          # Every path in a rewritten manifest must exist next to it.
+          for name in ci-revision-a ci-revision-b ci-revision-combined; do
+            manifest="files/$name/$version/manifest.json"
+            if ! paths=$(jq -r '.builds[] | (.ota.path // empty), (.parts[]?.path)' "$manifest"); then
+              echo "::error::Failed to read paths from $manifest"
+              fail=1
+              continue
+            fi
+            if [ -z "$paths" ]; then
+              echo "::error::$manifest lists no file paths"
+              fail=1
+              continue
+            fi
+            while IFS= read -r path; do
+              if [ ! -f "files/$name/$version/$path" ]; then
+                echo "::error::$manifest references missing file $path"
+                fail=1
+              fi
+            done <<< "$paths"
+          done
+
           shopt -s nullglob
-          for name in ci-single ci-combined ci-combined-single ci-rp2040; do
+          for name in "${expected_names[@]}"; do
             bins=("files/$name/$version/"*.bin)
             if [ "${#bins[@]}" -eq 0 ]; then
               echo "::error::No firmware binaries in files/$name/$version/"
@@ -175,6 +253,8 @@ jobs:
       - build-combined
       - build-combined-single
       - build-rp2040
+      - build-name-from-file
+      - build-name-from-file-combined
     permissions:
       contents: write
     uses: ./.github/workflows/upload-to-gh-release.yml
