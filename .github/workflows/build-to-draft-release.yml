@@ -72,6 +72,16 @@ on:
         required: false
         type: string
         default: ""
+      name-from-file:
+        description: >-
+          Name the firmware files and artifacts after each YAML file instead
+          of esphome.name (without its .yaml/.yml extension and a trailing
+          .factory), so several configs that share a device name, such as
+          hardware revisions, build side by side. The chip variant is still
+          appended to the firmware file names.
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   discover-files:
@@ -287,6 +297,7 @@ jobs:
     with:
       files: ${{ matrix.group.files }}
       combined-name: ${{ matrix.group.name }}
+      name-from-file: ${{ inputs.name-from-file }}
       esphome-version: ${{ inputs.esphome-version }}
       release-summary: ${{ needs.determine-version.outputs.summary }}
       release-url: ${{ needs.determine-version.outputs.url }}

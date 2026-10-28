@@ -32,6 +32,18 @@ on:
         required: false
         type: string
         default: ""
+      name-from-file:
+        description: >-
+          Name the firmware files and the artifact after the YAML file
+          instead of esphome.name, so several configs that share a device
+          name (e.g. hardware revisions) build side by side. The name is the
+          file name without its .yaml/.yml extension and without a trailing
+          .factory, so my-device-rev-a.factory.yaml becomes my-device-rev-a.
+          The chip variant is still appended to the firmware file names,
+          e.g. my-device-rev-a-esp32c3.factory.bin.
+        required: false
+        type: boolean
+        default: false
 
     outputs:
       version:
@@ -92,26 +104,87 @@ jobs:
           complete-manifest: true
           release-summary: ${{ inputs.release-summary }}
           release-url: ${{ inputs.release-url }}
+      # build-name is the base of the firmware file names and name is the
+      # artifact name. By default both come from esphome.name (via the build
+      # action's outputs); with name-from-file they come from the YAML file.
       - name: Determine artifact name
         id: artifact
+        env:
+          NAME_FROM_FILE: ${{ inputs.name-from-file }}
+          COMBINED_NAME: ${{ inputs.combined-name }}
+          ARTIFACT_PREFIX: ${{ needs.prepare.outputs.artifact-prefix }}
+          MATRIX_FILE: ${{ matrix.file }}
+          BUILD_ACTION_NAME: ${{ steps.esphome-build.outputs.name }}
+          ORIGINAL_NAME: ${{ steps.esphome-build.outputs.original-name }}
         run: |
-          if [ -n "${{ inputs.combined-name }}" ]; then
-            name="${{ needs.prepare.outputs.artifact-prefix }}-${{ steps.esphome-build.outputs.name }}"
+          set -euo pipefail
+          if [ "$NAME_FROM_FILE" = "true" ]; then
+            # Drop the directory, the .yaml/.yml extension and a trailing
+            # .factory from the file name.
+            stem=$(basename "$MATRIX_FILE")
+            case "$stem" in
+              *.yaml) stem="${stem%.yaml}" ;;
+              *.yml) stem="${stem%.yml}" ;;
+            esac
+            stem="${stem%.factory}"
+            if [ -z "$stem" ]; then
+              echo "::error::Cannot derive a name from file '$MATRIX_FILE'"
+              exit 1
+            fi
+            # The build action appends the chip variant to esphome.name.
+            variant="${BUILD_ACTION_NAME#"$ORIGINAL_NAME-"}"
+            build_name="$stem-$variant"
+            if [ -n "$COMBINED_NAME" ]; then
+              name="$ARTIFACT_PREFIX-$build_name"
+            else
+              name="$stem"
+            fi
           else
-            name="${{ steps.esphome-build.outputs.original-name }}"
+            build_name="$BUILD_ACTION_NAME"
+            if [ -n "$COMBINED_NAME" ]; then
+              name="$ARTIFACT_PREFIX-$BUILD_ACTION_NAME"
+            else
+              name="$ORIGINAL_NAME"
+            fi
           fi
-          echo name=$name >> $GITHUB_OUTPUT
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "build-name=$build_name" >> "$GITHUB_OUTPUT"
       # The artifact name is embedded as the top-level directory of the
       # artifact so that downloading with merge-multiple: true always yields
       # <path>/<artifact-name>/<version>/. download-artifact v5+ no longer
       # creates the per-artifact directory when a download matches only a
       # single artifact (actions/download-artifact#419).
+      #
+      # When the firmware name differs from the build action's, the first
+      # occurrence of the old name in each file name is replaced, and the
+      # manifest paths are rewritten to match.
       - name: Move files for versioning
+        env:
+          ARTIFACT_NAME: ${{ steps.artifact.outputs.name }}
+          BUILD_NAME: ${{ steps.artifact.outputs.build-name }}
+          BUILD_ACTION_NAME: ${{ steps.esphome-build.outputs.name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          name="${{ steps.artifact.outputs.name }}"
-          version="${{ needs.prepare.outputs.version }}"
-          mkdir -p "output/$name/$version"
-          mv ${{ steps.esphome-build.outputs.name }}/* "output/$name/$version/"
+          set -euo pipefail
+          dest="output/$ARTIFACT_NAME/$VERSION"
+          mkdir -p "$dest"
+          for src in "$BUILD_ACTION_NAME"/*; do
+            file=$(basename "$src")
+            mv "$src" "$dest/${file/"$BUILD_ACTION_NAME"/"$BUILD_NAME"}"
+          done
+          if [ "$BUILD_NAME" != "$BUILD_ACTION_NAME" ]; then
+            jq --arg old "$BUILD_ACTION_NAME" --arg new "$BUILD_NAME" '
+              def swap: split($old) as $p
+                | if ($p | length) > 1 then $p[0] + $new + ($p[1:] | join($old)) else . end;
+              if has("builds") then
+                .builds |= map(
+                  (if .ota.path then .ota.path |= swap else . end)
+                  | (if .parts then .parts |= map(.path |= swap) else . end)
+                )
+              else . end
+            ' "$dest/manifest.json" > "$dest/manifest.json.tmp"
+            mv "$dest/manifest.json.tmp" "$dest/manifest.json"
+          fi
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

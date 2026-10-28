@@ -97,6 +97,35 @@ single-group form; inside `groups` it would sweep one group's configs into
 another. `groups` is therefore mutually exclusive with `files` and
 `combined-name`.
 
+### Naming firmware after the YAML file
+
+Firmware files and artifacts are named after `esphome.name` plus the chip
+variant, so two configs that share a device name (for example hardware
+revisions with the same hostname) collide. Pass `name-from-file: true` to name
+them after the YAML file instead. The name is the file name without its
+`.yaml`/`.yml` extension and without a trailing `.factory`; the chip variant is
+still appended to the firmware files, and the manifest paths are rewritten to
+match:
+
+```yaml
+jobs:
+  build:
+    uses: esphome/workflows/.github/workflows/build-to-draft-release.yml@<ref>
+    permissions:
+      contents: write
+    with:
+      esphome-version: 2026.5.3
+      name-from-file: true
+      files: |
+        my-device-rev-a.factory.yaml
+        my-device-rev-b.factory.yaml
+```
+
+With both files declaring `name: my-device` on an ESP32-C3, this publishes
+`my-device-rev-a-esp32c3.factory.bin` and `my-device-rev-b-esp32c3.factory.bin`
+(plus a manifest each) instead of two files named `my-device-esp32c3.factory.bin`.
+`build.yml` accepts the same input.
+
 ### Excluding files from discovery
 
 `exclude-files` drops matching files from the build after `files` or
@@ -141,15 +170,16 @@ that is later renamed or removed will linger on it.
 
 Pull requests run `ci.yml`, which calls the reusable workflows from the PR's
 own checkout (`uses: ./.github/workflows/...`) against the ESPHome configs in
-`tests/`. It builds single-artifact, combined, and combined-single-file
-scenarios, verifies the downloaded artifact layout, and exercises
+`tests/`. It builds single-artifact, combined, combined-single-file,
+and name-from-file scenarios, verifies the downloaded artifact layout, and exercises
 `upload-to-gh-release.yml` against a draft release that is deleted afterwards.
 The R2 workflows are not run end-to-end (they need Cloudflare secrets), but
 they consume artifacts the same way the verified workflows do.
 
 `ci-draft-release.yml` smoke-tests `build-to-draft-release.yml`: factory
-config auto-discovery (with an `exclude-files` pattern that must drop one of
-the two discovered configs) plus the nested `build.yml` call, and a `groups`
+config auto-discovery with `name-from-file` (with an `exclude-files` pattern
+that must drop one of the discovered configs) plus the nested `build.yml` call,
+and a `groups`
 call that checks each group produces its own combined manifest without
 absorbing another group's builds. The draft-release jobs themselves are not
 exercised

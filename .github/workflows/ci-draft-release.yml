@@ -33,14 +33,18 @@ jobs:
     uses: ./.github/workflows/build-to-draft-release.yml
     with:
       # No files input: exercises the *.factory.yaml auto-discovery, which
-      # finds both tests/ci-draft.factory.yaml and
-      # tests/ci-draft-excluded.factory.yaml. exclude-files then has to drop
-      # the latter, and verify-artifacts below fails if it was built anyway.
+      # finds tests/ci-draft.factory.yaml, tests/ci-revision-a.factory.yaml
+      # and tests/ci-draft-excluded.factory.yaml. exclude-files then has to
+      # drop the last, and verify-artifacts below fails if it was built anyway.
       # The pattern deliberately omits the tests/ directory: matching it
       # against the full path proves * spans /, which is what lets consumers
       # exclude device/device.minimal.factory.yaml without listing any path.
       esphome-version: latest
       exclude-files: "*-excluded.factory.yaml"
+      # ci-revision-a's esphome.name is ci-revision, so this proves the input
+      # reaches build.yml: without it the firmware would be named
+      # ci-revision-esp8266. ci-draft's name already matches its file.
+      name-from-file: true
 
   # A repository publishing several combined manifests from one release (the
   # esphome/firmware shape) makes a single call with `groups`. Proves the
@@ -89,7 +93,7 @@ jobs:
           # Without a draft release to take a version from, build.yml
           # generates a dev-<timestamp> version. Each call generates its own,
           # so match with a glob rather than assuming one shared value.
-          for name in ci-draft ci-draft-group-a ci-draft-group-b; do
+          for name in ci-draft ci-revision-a ci-draft-group-a ci-draft-group-b; do
             if ! compgen -G "files/$name/dev-*/manifest.json" > /dev/null; then
               echo "::error::Missing files/$name/dev-*/manifest.json"
               fail=1
@@ -104,7 +108,7 @@ jobs:
           # Every group's manifest is present and combines exactly its own
           # files: a group must not absorb another group's builds, and the
           # ungrouped call must stay one manifest per file.
-          for spec in ci-draft:1 ci-draft-group-a:2 ci-draft-group-b:1; do
+          for spec in ci-draft:1 ci-revision-a:1 ci-draft-group-a:2 ci-draft-group-b:1; do
             name="${spec%:*}"
             expected="${spec#*:}"
             manifests=(files/"$name"/dev-*/manifest.json)
@@ -131,9 +135,41 @@ jobs:
             fail=1
           fi
 
+          # name-from-file names ci-revision-a's firmware after its file, and
+          # every manifest path must point at a file next to it.
+          factory=(files/ci-revision-a/dev-*/ci-revision-a-esp8266.factory.bin)
+          if [ "${#factory[@]}" -ne 1 ]; then
+            echo "::error::Missing ci-revision-a-esp8266.factory.bin"
+            fail=1
+          fi
+          stale=(files/*/dev-*/*ci-revision-esp8266*)
+          if [ "${#stale[@]}" -ne 0 ]; then
+            echo "::error::Firmware still named after esphome.name: ${stale[*]}"
+            fail=1
+          fi
+          for manifest in files/ci-revision-a/dev-*/manifest.json; do
+            if ! paths=$(jq -r '.builds[] | (.ota.path // empty), (.parts[]?.path)' "$manifest"); then
+              echo "::error::Failed to read $manifest"
+              fail=1
+              continue
+            fi
+            if [ -z "$paths" ]; then
+              echo "::error::$manifest lists no firmware paths"
+              fail=1
+              continue
+            fi
+            mapfile -t path_arr <<< "$paths"
+            for path in "${path_arr[@]}"; do
+              if [ ! -f "$(dirname "$manifest")/$path" ]; then
+                echo "::error::$manifest references missing $path"
+                fail=1
+              fi
+            done
+          done
+
           for entry in files/*; do
             case "$(basename "$entry")" in
-              ci-draft|ci-draft-group-a|ci-draft-group-b) ;;
+              ci-draft|ci-revision-a|ci-draft-group-a|ci-draft-group-b) ;;
               *)
                 echo "::error::Unexpected top-level entry: $entry"
                 fail=1
