@@ -100,7 +100,7 @@ jobs:
         # Only the auto-discovery path reads the repository; every other form
         # states its files up front.
         if: inputs.files == '' && inputs.groups == ''
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
       - name: Resolve build groups
         id: find
         env:

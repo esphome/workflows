@@ -91,12 +91,12 @@ jobs:
         file: ${{ fromJson(needs.prepare.outputs.files) }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
       - name: Replace project version
         run: |
           sed -i "s/version: dev/version: \"${{ needs.prepare.outputs.version }}\"/g" ${{ matrix.file }}
       - name: Build Firmware
-        uses: esphome/build-action@ae5408cdbc4f70692bf8e345c4982bca05a93667 # v8.1.0
+        uses: esphome/build-action@v8.1.0
         id: esphome-build
         with:
           yaml-file: ${{ matrix.file }}
@@ -186,7 +186,7 @@ jobs:
             mv "$dest/manifest.json.tmp" "$dest/manifest.json"
           fi
       - name: Upload artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: output
@@ -200,7 +200,7 @@ jobs:
     if: inputs.combined-name != ''
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: actions/download-artifact@v8.0.2
         with:
           path: files
           pattern: ${{ needs.prepare.outputs.artifact-prefix }}-*
@@ -218,7 +218,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Delete prefixed artifacts
-        uses: geekyeggo/delete-artifact@176a747ab7e287e3ff4787bf8a148716375ca118 # v6.0.0
+        uses: geekyeggo/delete-artifact@v6.0.0
         with:
           name: ${{ steps.artifacts.outputs.artifacts }}
 
@@ -240,7 +240,7 @@ jobs:
             files/*/$version/manifest.json > "output/$combined/$version/manifest.json"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ inputs.combined-name }}
           path: output
