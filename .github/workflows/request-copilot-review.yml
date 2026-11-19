@@ -1,0 +1,129 @@
+name: Request Copilot review
+
+# Requests a Copilot code review on the calling repository's ready pull
+# requests. The caller runs this from the "PR event" doorbell workflow
+# (workflow_run), an hourly schedule that catches doorbell runs held for
+# approval, and workflow_dispatch with a pr-number. Unless every-push is set,
+# a pull request is reviewed once, like the ruleset: when it is opened,
+# reopened or marked ready, never again on a push. The ruleset reviews these
+# too, but it runs the review as the PR author (or whoever marked it ready),
+# so a contributor without Copilot access gets none.
+# GitHub only acts on a request from an account with a Copilot seat
+# (GITHUB_TOKEN and app requests are accepted and then ignored), so this uses
+# esphome-review-bot's token. The bot needs a Copilot seat and Triage on the
+# calling repo. COPILOT_REVIEW_TOKEN is an org secret holding its fine-grained
+# token (Pull requests read and write) and expires: when it is rejected the run
+# fails, and an org owner signs in as the bot, creates a new one and replaces
+# the secret.
+# Logic lives in scripts/request-copilot-review/request-copilot-review.cjs.
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        description: Pull request number, for workflow_dispatch runs
+        type: string
+        required: false
+        default: ""
+      base-branch:
+        description: Only review pull requests against this branch (any when empty)
+        type: string
+        required: false
+        default: ""
+      every-push:
+        description: Review again after each push, once the previous review is done
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      COPILOT_REVIEW_TOKEN:
+        description: Fine-grained token of esphome-review-bot
+        required: true
+
+permissions: {}
+
+jobs:
+  find-prs:
+    name: Find pull requests
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read  # to check out the script below
+      pull-requests: read  # list open pull requests
+    outputs:
+      numbers: ${{ steps.find.outputs.numbers }}
+    steps:
+      - name: Check out the Copilot review script
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .esphome-workflows
+          sparse-checkout: scripts/request-copilot-review
+          persist-credentials: false
+
+      - name: Find pull requests
+        id: find
+        uses: actions/github-script@v9.0.0
+        env:
+          PR_NUMBER: ${{ inputs.pr-number }}
+        with:
+          script: |
+            const dir = `${process.env.GITHUB_WORKSPACE}/.esphome-workflows/scripts/request-copilot-review`;
+            const { findPullRequests } = require(`${dir}/request-copilot-review.cjs`);
+            const numbers = await findPullRequests({
+              github,
+              context,
+              prNumber: process.env.PR_NUMBER,
+            });
+            core.setOutput('numbers', JSON.stringify(numbers));
+
+  request:
+    name: Request Copilot review
+    needs: find-prs
+    if: needs.find-prs.outputs.numbers != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        pr: ${{ fromJSON(needs.find-prs.outputs.numbers) }}
+    runs-on: ubuntu-latest
+    # Overlapping runs could each take the other's request as their own confirmation.
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.pr }}
+      cancel-in-progress: true
+    permissions:
+      contents: read  # to check out the script below
+    steps:
+      # The script lives in this repository, not the caller's, so check it
+      # out at the exact commit the caller pinned this workflow to. Never the
+      # PR's code - this job holds the review bot's token.
+      - name: Check out the Copilot review script
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .esphome-workflows
+          sparse-checkout: scripts/request-copilot-review
+          persist-credentials: false
+
+      - name: Request Copilot review
+        uses: actions/github-script@v9.0.0
+        env:
+          PR_NUMBER: ${{ matrix.pr }}
+          BASE_BRANCH: ${{ inputs.base-branch }}
+          EVERY_PUSH: ${{ inputs.every-push }}
+        with:
+          github-token: ${{ secrets.COPILOT_REVIEW_TOKEN }}
+          script: |
+            const dir = `${process.env.GITHUB_WORKSPACE}/.esphome-workflows/scripts/request-copilot-review`;
+            const { requestCopilotReview } = require(`${dir}/request-copilot-review.cjs`);
+            await requestCopilotReview({
+              github,
+              core,
+              context,
+              prNumber: Number(process.env.PR_NUMBER),
+              baseBranch: process.env.BASE_BRANCH,
+              everyPush: process.env.EVERY_PUSH === 'true',
+            });

@@ -1,6 +1,6 @@
 {
   "private": true,
   "scripts": {
-    "test": "node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include='scripts/stale/*.js' 'scripts/stale/test/*.test.js'"
+    "test": "node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include='scripts/stale/*.js' --test-coverage-include='scripts/request-copilot-review/*.cjs' 'scripts/stale/test/*.test.js' 'scripts/request-copilot-review/test/*.test.mts'"
   }
 }
