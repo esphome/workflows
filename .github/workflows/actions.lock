@@ -20,7 +20,7 @@ workflows:
         - 'actions/download-artifact@v8.0.2'
         - 'actions/setup-node@v7.1.0'
     '.github/workflows/draft-calver-release.yml':
-        - 'release-drafter/release-drafter@v7.10.0'
+        - 'release-drafter/release-drafter@v7.11.0'
     '.github/workflows/lock.yml':
         - 'actions/github-script@v9.0.0'
     '.github/workflows/promote-r2.yml':
@@ -83,8 +83,8 @@ dependencies:
         commit: 'sha1-176a747ab7e287e3ff4787bf8a148716375ca118'
         owner_id: 1429781
         repo_id: 258660849
-    'release-drafter/release-drafter@v7.10.0':
-        ref: 'v7.10.0'
-        commit: 'sha1-978bb0b30c5ee8cdd332ced253758157150d43f0'
+    'release-drafter/release-drafter@v7.11.0':
+        ref: 'v7.11.0'
+        commit: 'sha1-d1a19e60e81a7e650d00a7de9277f87e439117ea'
         owner_id: 58292376
         repo_id: 139022359
