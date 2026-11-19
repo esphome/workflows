@@ -29,6 +29,9 @@ workflows:
         - 'actions/create-github-app-token@v3.3.0'
     '.github/workflows/publish-firmware-to-r2.yml':
         - 'actions/upload-artifact@v7.0.2'
+    '.github/workflows/request-copilot-review.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'actions/github-script@v9.0.0'
     '.github/workflows/stale.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/create-github-app-token@v3.3.0'

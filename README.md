@@ -28,6 +28,12 @@ firmware to https://firmware.esphome.io/):
 - `publish-firmware-to-r2.yml` - Push a published release's firmware to R2
   and promote it
 
+### Pull Request Workflows
+- `request-copilot-review.yml` - Request a Copilot review as esphome-review-bot
+  on pull requests. Runs from the `PR event` doorbell via `workflow_run` (plus
+  an hourly schedule and `workflow_dispatch`). Inputs: `pr-number` (for
+  dispatch), `base-branch` (default any), `every-push` (default false, review
+  once per pull request). Needs the `COPILOT_REVIEW_TOKEN` secret
 
 ## Usage
 
