@@ -10,6 +10,8 @@ const COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]";
 // The timeline names the reviewer by its display login; the reviews API uses
 // the bot account.
 const COPILOT_LOGINS = new Set(["Copilot", COPILOT_REVIEWER]);
+// Timeline events after which a pull request is due a fresh review.
+const REREVIEW_EVENTS = new Set(["reopened", "ready_for_review", "convert_to_draft"]);
 
 // Which open pull requests should this run look at? The caller was started by
 // the "PR event" doorbell (workflow_run), the hourly sweep (schedule) or by
@@ -172,11 +174,13 @@ function reviewedSince(events, since) {
 }
 
 // Why Copilot needs no new request, or "" when it does. Without every-push a
-// request that was ever made is enough: that stands in for reviewing only when
-// a pull request is opened, reopened or marked ready.
+// request made since the pull request was last reopened or marked ready (or
+// ever, if it never was) is enough: that stands in for reviewing only when a
+// pull request is opened, reopened or marked ready.
 function skipReason(events, headSha, everyPush) {
   if (!everyPush) {
-    return events.some(
+    const reset = events.findLastIndex((event) => REREVIEW_EVENTS.has(event.event));
+    return events.slice(reset + 1).some(
       (event) =>
         event.event === "review_requested" &&
         COPILOT_LOGINS.has(event.requested_reviewer?.login)

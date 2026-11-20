@@ -220,6 +220,40 @@ describe("request-copilot-review", () => {
     });
   }
 
+  for (const [name, before, requests] of [
+    ["reopened", [copilotRequest(1, "other", OLD), { id: 2, event: "reopened" }], true],
+    ["marked ready", [copilotRequest(1, "other", OLD), { id: 2, event: "ready_for_review" }], true],
+    [
+      "converted to draft and marked ready",
+      [copilotRequest(1, "other", OLD), { id: 2, event: "convert_to_draft" }, { id: 3, event: "ready_for_review" }],
+      true,
+    ],
+    ["reopened and then requested", [{ id: 1, event: "reopened" }, copilotRequest(2, "other")], false],
+    [
+      "pushed to only",
+      [copilotRequest(1, "other", OLD), { id: 2, event: "committed" }, { id: 3, event: "head_ref_force_pushed" }],
+      false,
+    ],
+    [
+      "reopened with only a non-Copilot request",
+      [{ id: 1, event: "reopened" }, { id: 2, event: "review_requested", requested_reviewer: { login: "someone" } }],
+      true,
+    ],
+  ] as const) {
+    it(`${requests ? "requests again" : "skips"} without every-push once ${name}`, async () => {
+      const { github, calls, reads } = makeGithub({
+        before: [...before],
+        after: [...before, copilotRequest(99, "ours")],
+      });
+      const { core, infos, warnings } = makeCore();
+      await run(github, core);
+      expect(calls).toHaveLength(requests ? 1 : 0);
+      expect(reads).toHaveLength(requests ? 0 : 1);
+      expect(warnings).toEqual([]);
+      if (!requests) expect(infos[0]).toMatch(/already requested/);
+    });
+  }
+
   it("ignores other earlier events without every-push", async () => {
     const { github, calls } = makeGithub({ before: [{ id: 1, event: "labeled" }] });
     const { core } = makeCore();
